@@ -55,7 +55,8 @@ export const EventFiltersBar = memo(function EventFiltersBar() {
         </select>
       </div>
 
-      <p className="event-filters__count">{totalCount.toLocaleString()} events loaded</p>
-    </section>
+<p className="event-filters__count" aria-live="polite" role="status">
+        {totalCount.toLocaleString()} events loaded
+      </p>    </section>
   );
 });

@@ -1,3 +1,4 @@
+require('@testing-library/jest-dom');
 Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
   configurable: true,
   get() {

@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, type KeyboardEvent } from 'react';
 import type { BlockchainEvent } from '../types/event';
 
 export type EventCardVariant = 'compact' | 'expanded';
@@ -105,18 +105,29 @@ function LoadingCard({ variant }: { variant: EventCardVariant }) {
   );
 }
 
+function handleActivationKey(onClick: (e: BlockchainEvent) => void, event: BlockchainEvent) {
+  return (e: KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onClick(event);
+    }
+  };
+}
+
 function CompactCard({ event, onClick }: { event: BlockchainEvent; onClick?: (e: BlockchainEvent) => void }) {
   const displayName = event.eventName ?? event.type;
   const badgeClass = getEventBadgeClass(event.eventName);
+  const Wrapper = onClick ? 'div' : 'article';
 
   return (
-    <article
+    <Wrapper
       className={`event-card event-card--compact${onClick ? ' event-card--clickable' : ''}`}
       data-event-id={event.eventId}
       onClick={onClick ? () => onClick(event) : undefined}
       role={onClick ? 'button' : undefined}
       tabIndex={onClick ? 0 : undefined}
-      onKeyDown={onClick ? (e) => e.key === 'Enter' && onClick(event) : undefined}
+      aria-label={onClick ? `View details for ${displayName} event` : undefined}
+      onKeyDown={onClick ? handleActivationKey(onClick, event) : undefined}
     >
       <div className="event-card__primary">
         <span className={`event-card__badge ${badgeClass}`}>{displayName}</span>
@@ -136,22 +147,24 @@ function CompactCard({ event, onClick }: { event: BlockchainEvent; onClick?: (e:
           <span title={event.txHash}>Tx: {shortenAddress(event.txHash)}</span>
         )}
       </div>
-    </article>
+    </Wrapper>
   );
 }
 
 function ExpandedCard({ event, onClick }: { event: BlockchainEvent; onClick?: (e: BlockchainEvent) => void }) {
   const displayName = event.eventName ?? event.type;
   const badgeClass = getEventBadgeClass(event.eventName);
+  const Wrapper = onClick ? 'div' : 'article';
 
   return (
-    <article
+    <Wrapper
       className={`event-card event-card--expanded${onClick ? ' event-card--clickable' : ''}`}
       data-event-id={event.eventId}
       onClick={onClick ? () => onClick(event) : undefined}
       role={onClick ? 'button' : undefined}
       tabIndex={onClick ? 0 : undefined}
-      onKeyDown={onClick ? (e) => e.key === 'Enter' && onClick(event) : undefined}
+      aria-label={onClick ? `View details for ${displayName} event` : undefined}
+      onKeyDown={onClick ? handleActivationKey(onClick, event) : undefined}
     >
       <div className="event-card__header">
         <h3 className="event-card__title">{displayName}</h3>
@@ -206,7 +219,7 @@ function ExpandedCard({ event, onClick }: { event: BlockchainEvent; onClick?: (e
           </div>
         </dl>
       </div>
-    </article>
+    </Wrapper>
   );
 }
 

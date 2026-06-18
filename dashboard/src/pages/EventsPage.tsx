@@ -56,8 +56,12 @@ export function EventsPage() {
 
       <EventFiltersBar />
 
-      {isLoading && <p className="events-page__status">Loading events...</p>}
-      {error && <p className="events-page__status events-page__status--warning">{error}</p>}
+      <div aria-live="polite" role="status">
+        {isLoading && <p className="events-page__status">Loading events...</p>}
+      </div>
+      <div aria-live="assertive" role="alert">
+        {error && <p className="events-page__status events-page__status--warning">{error}</p>}
+      </div>
 
       <EventListPanel />
     </main>
