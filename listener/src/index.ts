@@ -35,6 +35,8 @@ async function main() {
   const eventsServer = startEventsServer({
     port: config.eventsApiPort,
     corsOrigin: config.eventsApiCorsOrigin,
+    stellarRpcUrl: config.stellarRpcUrl,
+    discordWebhookUrl: config.discord?.webhookUrl,
   });
   const subscriber = new EventSubscriber(config);
   await subscriber.start();
