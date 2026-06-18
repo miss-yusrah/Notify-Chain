@@ -46,4 +46,8 @@ pub enum Error {
     GroupAlreadyInactive = 20,
     /// Triggered when the contract has insufficient balance for a withdrawal.
     InsufficientContractBalance = 21,
+    /// Triggered when a name string exceeds the maximum allowed length.
+    NameTooLong = 22,
+    /// Triggered when the number of members exceeds the maximum allowed.
+    TooManyMembers = 23,
 }

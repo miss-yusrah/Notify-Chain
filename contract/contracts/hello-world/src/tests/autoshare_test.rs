@@ -1612,3 +1612,92 @@ fn test_create_group_with_payment() {
     assert_eq!(details.usage_count, usage_count);
     assert_eq!(details.total_usages_paid, usage_count);
 }
+
+// ============================================================================
+// Payload Size Validation Tests (Issue #46)
+// ============================================================================
+
+#[test]
+#[should_panic(expected = "NameTooLong")]
+fn test_name_too_long_rejected() {
+    let test_env = setup_test_env();
+    let client = AutoShareContractClient::new(&test_env.env, &test_env.autoshare_contract);
+    client.initialize_admin(&test_env.admin);
+
+    let creator = test_env.users.get(0).unwrap().clone();
+    let token = test_env.mock_tokens.get(0).unwrap().clone();
+    crate::test_utils::mint_tokens(&test_env.env, &token, &creator, 10_000_000);
+
+    let id = BytesN::from_array(&test_env.env, &[1u8; 32]);
+    let long_name = String::from_str(&test_env.env, &"A".repeat(150));
+    client.create(&id, &long_name, &creator, &1u32, &token);
+}
+
+#[test]
+fn test_name_at_max_length_succeeds() {
+    let test_env = setup_test_env();
+    let client = AutoShareContractClient::new(&test_env.env, &test_env.autoshare_contract);
+    client.initialize_admin(&test_env.admin);
+
+    let creator = test_env.users.get(0).unwrap().clone();
+    let token = test_env.mock_tokens.get(0).unwrap().clone();
+    crate::test_utils::mint_tokens(&test_env.env, &token, &creator, 10_000_000);
+
+    let id = BytesN::from_array(&test_env.env, &[1u8; 32]);
+    // Name at exactly MAX_NAME_LENGTH (100 chars)
+    let max_name = String::from_str(&test_env.env, &"A".repeat(100));
+    // Should NOT panic
+    client.create(&id, &max_name, &creator, &1u32, &token);
+}
+
+#[test]
+#[should_panic(expected = "TooManyMembers")]
+fn test_too_many_members_rejected() {
+    let test_env = setup_test_env();
+    let client = AutoShareContractClient::new(&test_env.env, &test_env.autoshare_contract);
+    client.initialize_admin(&test_env.admin);
+
+    let creator = test_env.users.get(0).unwrap().clone();
+    let token = test_env.mock_tokens.get(0).unwrap().clone();
+    crate::test_utils::mint_tokens(&test_env.env, &token, &creator, 10_000_000);
+
+    let id = BytesN::from_array(&test_env.env, &[1u8; 32]);
+    let name = String::from_str(&test_env.env, "Test Group");
+    client.create(&id, &name, &creator, &1u32, &token);
+
+    // Build > MAX_MEMBERS (51 members, limit is 50)
+    let mut members = Vec::new(&test_env.env);
+    for i in 0..51u32 {
+        members.push_back(GroupMember {
+            address: Address::generate(&test_env.env),
+            percentage: 100 / 51,
+        });
+    }
+    client.update_members(&id, &creator, &members);
+}
+
+#[test]
+fn test_members_at_max_succeeds() {
+    let test_env = setup_test_env();
+    let client = AutoShareContractClient::new(&test_env.env, &test_env.autoshare_contract);
+    client.initialize_admin(&test_env.admin);
+
+    let creator = test_env.users.get(0).unwrap().clone();
+    let token = test_env.mock_tokens.get(0).unwrap().clone();
+    crate::test_utils::mint_tokens(&test_env.env, &token, &creator, 10_000_000);
+
+    let id = BytesN::from_array(&test_env.env, &[1u8; 32]);
+    let name = String::from_str(&test_env.env, "Max Members");
+    client.create(&id, &name, &creator, &1u32, &token);
+
+    // Exactly MAX_MEMBERS (50 members, each 2%)
+    let mut members = Vec::new(&test_env.env);
+    for i in 0..50u32 {
+        members.push_back(GroupMember {
+            address: Address::generate(&test_env.env),
+            percentage: 2,
+        });
+    }
+    // Should NOT panic
+    client.update_members(&id, &creator, &members);
+}
