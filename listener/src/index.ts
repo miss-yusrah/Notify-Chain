@@ -1,38 +1,10 @@
 import dotenv from 'dotenv';
-import { Config, DiscordConfig } from './types';
 import { startEventsServer } from './api/events-server';
 import { EventSubscriber } from './services/event-subscriber';
 import logger from './utils/logger';
+import { loadConfig, ConfigError } from './config';
 
 dotenv.config();
-
-function loadDiscordConfig(): DiscordConfig | undefined {
-  const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
-  const webhookId = process.env.DISCORD_WEBHOOK_ID;
-  if (!webhookUrl || !webhookId) {
-    return undefined;
-  }
-  return { webhookUrl, webhookId };
-}
-
-function loadConfig(): Config {
-  const discord = loadDiscordConfig();
-  return {
-    stellarNetwork: process.env.STELLAR_NETWORK || 'testnet',
-    stellarRpcUrl: process.env.STELLAR_RPC_URL || 'https://soroban-testnet.stellar.org:443',
-    contractAddresses: JSON.parse(process.env.CONTRACT_ADDRESSES || '[]'),
-    pollIntervalMs: parseInt(process.env.POLL_INTERVAL_MS || '30000'),
-    maxReconnectAttempts: parseInt(process.env.MAX_RECONNECT_ATTEMPTS || '5'),
-    reconnectDelayMs: parseInt(process.env.RECONNECT_DELAY_MS || '5000'),
-    eventsApiPort: parseInt(process.env.EVENTS_API_PORT || '8787'),
-    eventsApiCorsOrigin: process.env.EVENTS_API_CORS_ORIGIN || 'http://localhost:5173',
-    discord,
-    retryQueue: {
-      baseDelayMs: parseInt(process.env.RETRY_BASE_DELAY_MS || '5000'),
-      maxRetries: parseInt(process.env.RETRY_MAX_RETRIES || '5'),
-    },
-  };
-}
 
 async function main() {
   const config = loadConfig();
@@ -63,6 +35,10 @@ async function main() {
 }
 
 main().catch((err) => {
-  logger.error('Error starting service', { error: err });
+  if (err instanceof ConfigError) {
+    logger.error('Configuration error', { error: err.message });
+  } else {
+    logger.error('Error starting service', { error: err });
+  }
   process.exit(1);
 });
