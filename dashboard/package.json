@@ -11,11 +11,15 @@
     "benchmark": "node ./node_modules/jest/bin/jest.js src/benchmark"
   },
   "dependencies": {
+    "@creit.tech/stellar-wallets-kit": "^2.3.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "zustand": "^5.0.6"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/jest": "^29.5.14",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",

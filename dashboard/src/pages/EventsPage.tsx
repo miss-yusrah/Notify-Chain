@@ -1,10 +1,12 @@
 import { useEffect } from 'react';
 import { EventFiltersBar } from '../components/EventFiltersBar';
 import { EventListPanel } from '../components/EventListPanel';
+import { WalletConnectButton } from '../components/WalletConnectButton';
 import { useEventLoadingState } from '../hooks/useEventSelectors';
 import { useEventStore } from '../store/eventStore';
 import { fetchEvents } from '../services/eventsApi';
 import { generateMockEvents } from '../utils/eventData';
+import { restoreWalletSession } from '../services/wallet';
 
 const DEFAULT_EVENT_COUNT = 5000;
 const API_URL =
@@ -15,6 +17,10 @@ export function EventsPage() {
   const setLoading = useEventStore((state) => state.setLoading);
   const setError = useEventStore((state) => state.setError);
   const { isLoading, error } = useEventLoadingState();
+
+  useEffect(() => {
+    restoreWalletSession();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -50,8 +56,13 @@ export function EventsPage() {
   return (
     <main className="events-page">
       <header className="events-page__header">
-        <h1>Blockchain Events</h1>
-        <p>Optimized rendering for large event datasets.</p>
+        <div className="events-page__header-row">
+          <div>
+            <h1>Blockchain Events</h1>
+            <p>Optimized rendering for large event datasets.</p>
+          </div>
+          <WalletConnectButton />
+        </div>
       </header>
 
       <EventFiltersBar />
