@@ -505,7 +505,8 @@ describe('EventSubscriber', () => {
 
       expect(mockDiscordService.sendEventNotification).toHaveBeenCalledWith(
         expect.any(Object),
-        expect.any(Object)
+        expect.any(Object),
+        expect.any(String)
       );
     });
 

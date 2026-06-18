@@ -1,0 +1,76 @@
+# Logging Guidelines
+
+The listener uses [Winston](https://github.com/winstonjs/winston) for structured JSON logging. Every log entry follows a consistent schema to make logs machine-readable and easy to trace through the notification pipeline.
+
+## Log Format
+
+Each entry contains these standard fields:
+
+| Field        | Type    | Description                                                    |
+|--------------|---------|----------------------------------------------------------------|
+| `timestamp`  | string  | ISO 8601 timestamp (added automatically)                       |
+| `level`      | string  | Severity: `error`, `warn`, `info`, `debug`                     |
+| `message`    | string  | Human-readable description of the event                        |
+| `requestId`  | string  | Short UUID prefix scoped to a single poll cycle or API request |
+| `durationMs` | number  | Elapsed milliseconds for timed operations                      |
+
+Additional context fields (e.g. `contractAddress`, `eventId`) are appended as needed.
+
+## Request IDs
+
+A `requestId` is generated at the start of every poll cycle and every HTTP request. It is threaded through all log calls within that unit of work so you can trace a single notification from receipt to delivery.
+
+```
+2026-06-17T12:00:00.000Z info: Poll cycle complete {"requestId":"a1b2c3d4","durationMs":42}
+2026-06-17T12:00:00.001Z info: Received events {"requestId":"a1b2c3d4","contractAddress":"CA...","count":2,"processed":2}
+2026-06-17T12:00:00.002Z info: Processing event {"requestId":"a1b2c3d4","eventId":"event-1","eventName":"TaskCreated",...}
+2026-06-17T12:00:00.005Z info: Sending Discord notification {"requestId":"a1b2c3d4","eventId":"event-1",...}
+2026-06-17T12:00:00.120Z info: Discord notification delivered {"requestId":"a1b2c3d4","eventId":"event-1","durationMs":115}
+2026-06-17T12:00:00.121Z info: Event processing complete {"requestId":"a1b2c3d4","eventId":"event-1","durationMs":119}
+```
+
+## Delivery Lifecycle Events
+
+The following messages mark each stage of the notification pipeline:
+
+| Stage                  | Level   | Message                                               |
+|------------------------|---------|-------------------------------------------------------|
+| Poll cycle start       | `info`  | `Poll cycle complete` (logged at end with duration)   |
+| Events received        | `info`  | `Received events`                                     |
+| Invalid payload        | `warn`  | `Skipping invalid event payload`                      |
+| Event accepted         | `info`  | `Processing event`                                    |
+| Discord send start     | `info`  | `Sending Discord notification`                        |
+| Discord delivered      | `info`  | `Discord notification delivered`                      |
+| Discord failed         | `error` | `Discord webhook failed`                              |
+| Event done             | `info`  | `Event processing complete`                           |
+| API request received   | `info`  | `Handling GET /api/events`                            |
+| API request done       | `info`  | `GET /api/events complete`                            |
+| Reconnect attempt      | `warn`  | `Attempting to reconnect`                             |
+| Max retries exceeded   | `error` | `Max reconnection attempts exceeded, stopping service`|
+
+## Configuration
+
+Set the `LOG_LEVEL` environment variable to control verbosity:
+
+```
+LOG_LEVEL=debug   # verbose, includes all messages
+LOG_LEVEL=info    # default
+LOG_LEVEL=warn    # warnings and errors only
+LOG_LEVEL=error   # errors only
+```
+
+In development (`NODE_ENV` not set to `production`), logs use a colorized single-line format. In production they output newline-delimited JSON, suitable for ingestion by log aggregators such as Datadog, CloudWatch, or Loki.
+
+## Adding New Log Calls
+
+- Always pass `requestId` if one is available in the current scope.
+- Use `durationMs` for any operation that involves I/O (RPC calls, webhook delivery, DB writes).
+- Prefer structured metadata over embedding values in the message string.
+
+```typescript
+// good
+logger.info('Processing event', { requestId, eventId, eventName, durationMs });
+
+// avoid
+logger.info(`Processing event ${eventId} (${eventName}) took ${durationMs}ms`);
+```

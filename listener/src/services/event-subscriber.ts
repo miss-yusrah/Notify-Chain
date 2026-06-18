@@ -2,6 +2,7 @@ import * as StellarSDK from '@stellar/stellar-sdk';
 import { Config, ContractConfig } from '../types';
 import { eventRegistry } from '../store/event-registry';
 import logger from '../utils/logger';
+import { generateRequestId } from '../utils/request-id';
 import {
   getEventName,
   matchesEventFilter,
@@ -38,18 +39,31 @@ export class EventSubscriber {
 
   private async poll(): Promise<void> {
     while (this.isRunning) {
+      const requestId = generateRequestId();
+      const pollStart = Date.now();
+
       try {
-        await this.checkForEvents();
+        await this.checkForEvents(requestId);
         this.reconnectAttempts = 0;
+
+        logger.info('Poll cycle complete', {
+          requestId,
+          durationMs: Date.now() - pollStart,
+        });
+
         await this.delay(this.config.pollIntervalMs);
       } catch (error) {
-        logger.error('Error polling for events', { error });
-        await this.handleReconnection();
+        logger.error('Error polling for events', {
+          requestId,
+          error,
+          durationMs: Date.now() - pollStart,
+        });
+        await this.handleReconnection(requestId);
       }
     }
   }
 
-  private async checkForEvents(): Promise<void> {
+  private async checkForEvents(requestId: string = generateRequestId()): Promise<void> {
     const totalContracts = this.config.contractAddresses.length;
     let failureCount = 0;
 
@@ -58,11 +72,12 @@ export class EventSubscriber {
         const response = await this.getContractEvents(contractConfig);
         const events = response.events || [];
         const processableEvents = events.filter((event) =>
-          this.shouldProcessEvent(event, contractConfig)
+          this.shouldProcessEvent(event, contractConfig, requestId)
         );
 
         if (events.length > 0) {
           logger.info('Received events', {
+            requestId,
             contractAddress: contractConfig.address,
             count: events.length,
             processed: processableEvents.length,
@@ -70,7 +85,7 @@ export class EventSubscriber {
         }
 
         for (const event of processableEvents) {
-          await this.processEvent(event, contractConfig);
+          await this.processEvent(event, contractConfig, requestId);
         }
 
         if (response.cursor) {
@@ -79,6 +94,7 @@ export class EventSubscriber {
       } catch (error) {
         failureCount++;
         logger.error('Error fetching events for contract', {
+          requestId,
           contractAddress: contractConfig.address,
           error,
         });
@@ -94,11 +110,13 @@ export class EventSubscriber {
 
   private shouldProcessEvent(
     event: StellarSDK.rpc.Api.EventResponse,
-    contractConfig: ContractConfig
+    contractConfig: ContractConfig,
+    requestId: string = ''
   ): boolean {
     const validation = validateEventPayload(event);
     if (!validation.valid) {
       logger.warn('Skipping invalid event payload', {
+        requestId,
         contractAddress: contractConfig.address,
         eventId: event.id,
         reason: validation.reason,
@@ -145,8 +163,10 @@ export class EventSubscriber {
 
   private async processEvent(
     event: StellarSDK.rpc.Api.EventResponse,
-    contractConfig: ContractConfig
+    contractConfig: ContractConfig,
+    requestId: string = ''
   ): Promise<void> {
+    const eventStart = Date.now();
     const eventName = getEventName(event.topic);
     const displayEvent = eventRegistry.addFromInput({
       eventId: event.id,
@@ -160,6 +180,7 @@ export class EventSubscriber {
     });
 
     logger.info('Processing event', {
+      requestId,
       contractAddress: displayEvent.contractAddress,
       eventId: displayEvent.eventId,
       eventName: displayEvent.eventName,
@@ -172,17 +193,25 @@ export class EventSubscriber {
     if (this.discordService) {
       const success = await this.discordService.sendEventNotification(
         event,
-        contractConfig
+        contractConfig,
+        requestId
       );
       if (!success) {
         logger.warn('Failed to send Discord notification, event will still be processed', {
+          requestId,
           eventId: event.id,
         });
       }
     }
+
+    logger.info('Event processing complete', {
+      requestId,
+      eventId: event.id,
+      durationMs: Date.now() - eventStart,
+    });
   }
 
-  private async handleReconnection(): Promise<void> {
+  private async handleReconnection(requestId?: string): Promise<void> {
     if (this.reconnectAttempts >= this.config.maxReconnectAttempts) {
       logger.error('Max reconnection attempts exceeded, stopping service');
       this.stop();
@@ -192,6 +221,7 @@ export class EventSubscriber {
     this.reconnectAttempts++;
     const delay = this.config.reconnectDelayMs * this.reconnectAttempts;
     logger.warn('Attempting to reconnect', {
+      requestId,
       attempt: this.reconnectAttempts,
       delayMs: delay,
     });
