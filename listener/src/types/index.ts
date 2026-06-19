@@ -15,6 +15,11 @@ export interface RetryQueueConfig {
   maxRetries?: number;
 }
 
+export interface WebhookSecret {
+  id: string;
+  secret: string;
+}
+
 export interface Config {
   stellarNetwork: string;
   stellarRpcUrl: string;
@@ -26,5 +31,6 @@ export interface Config {
   eventsApiCorsOrigin: string;
   discord?: DiscordConfig;
   retryQueue?: RetryQueueConfig;
+  webhookSecrets?: WebhookSecret[];
 }
 

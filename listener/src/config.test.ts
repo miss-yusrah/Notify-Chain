@@ -92,4 +92,49 @@ describe('Config validation', () => {
       deduplicationMaxSize: 250,
     });
   });
+
+  describe('WEBHOOK_SECRETS', () => {
+    it('defaults to an empty array when not set', () => {
+      delete process.env.WEBHOOK_SECRETS;
+      const config = loadConfig();
+      expect(config.webhookSecrets).toEqual([]);
+    });
+
+    it('parses valid webhook secrets', () => {
+      process.env.WEBHOOK_SECRETS = JSON.stringify([
+        { id: 'key-1', secret: 'whsec_abc' },
+        { id: 'key-2', secret: 'whsec_def' },
+      ]);
+
+      const config = loadConfig();
+      expect(config.webhookSecrets).toEqual([
+        { id: 'key-1', secret: 'whsec_abc' },
+        { id: 'key-2', secret: 'whsec_def' },
+      ]);
+    });
+
+    it('throws ConfigError for invalid JSON', () => {
+      process.env.WEBHOOK_SECRETS = 'not-json';
+      expect(() => loadConfig()).toThrow(ConfigError);
+      expect(() => loadConfig()).toThrow('WEBHOOK_SECRETS must be valid JSON');
+    });
+
+    it('throws ConfigError when item is missing id', () => {
+      process.env.WEBHOOK_SECRETS = JSON.stringify([{ secret: 'whsec_abc' }]);
+      expect(() => loadConfig()).toThrow(ConfigError);
+      expect(() => loadConfig()).toThrow('WEBHOOK_SECRETS[0].id must be a non-empty string');
+    });
+
+    it('throws ConfigError when item is missing secret', () => {
+      process.env.WEBHOOK_SECRETS = JSON.stringify([{ id: 'key-1' }]);
+      expect(() => loadConfig()).toThrow(ConfigError);
+      expect(() => loadConfig()).toThrow('WEBHOOK_SECRETS[0].secret must be a non-empty string');
+    });
+
+    it('throws ConfigError when value is not an array', () => {
+      process.env.WEBHOOK_SECRETS = '"string-value"';
+      expect(() => loadConfig()).toThrow(ConfigError);
+      expect(() => loadConfig()).toThrow('WEBHOOK_SECRETS must be a JSON array');
+    });
+  });
 });

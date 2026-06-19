@@ -1,4 +1,5 @@
 import http from 'http';
+import crypto from 'crypto';
 import { createEventsServer, checkStellarRpc, checkDiscord } from './events-server';
 import { eventRegistry } from '../store/event-registry';
 
@@ -235,5 +236,152 @@ describe('unknown routes', () => {
 
     expect(status).toBe(404);
     expect((body as any).error).toBe('Not found');
+  });
+});
+
+function computeSignature(payload: string, secret: string): string {
+  const sig = crypto.createHmac('sha256', secret).update(payload, 'utf8').digest('hex');
+  return `sha256=${sig}`;
+}
+
+function makePostRequest(
+  server: http.Server,
+  path: string,
+  body: string,
+  headers: Record<string, string>
+): Promise<{ status: number; body: unknown }> {
+  return new Promise((resolve, reject) => {
+    const addr = server.address() as { port: number };
+    const req = http.request(
+      {
+        host: '127.0.0.1',
+        port: addr.port,
+        path,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers,
+        },
+      },
+      (res) => {
+        let data = '';
+        res.on('data', (chunk) => (data += chunk));
+        res.on('end', () => {
+          try {
+            resolve({ status: res.statusCode!, body: JSON.parse(data) });
+          } catch {
+            resolve({ status: res.statusCode!, body: data });
+          }
+        });
+      }
+    );
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+describe('POST /api/webhooks', () => {
+  let server: http.Server;
+  const secrets = [
+    { id: 'key-1', secret: 'whsec_test_secret' },
+    { id: 'key-2', secret: 'whsec_other_secret' },
+  ];
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  afterEach(async () => {
+    if (server) await closeServer(server);
+  });
+
+  it('accepts a webhook with a valid signature', async () => {
+    const payload = JSON.stringify({ event: 'test', data: { foo: 'bar' } });
+    const signature = computeSignature(payload, 'whsec_test_secret');
+
+    server = await startServer({ ...BASE_OPTIONS, webhookSecrets: secrets });
+    const { status, body } = await makePostRequest(server, '/api/webhooks', payload, {
+      'X-Webhook-Signature': signature,
+      'X-Webhook-Key-Id': 'key-1',
+    });
+
+    expect(status).toBe(202);
+    expect((body as any).status).toBe('accepted');
+  });
+
+  it('rejects a webhook with an invalid signature', async () => {
+    const payload = JSON.stringify({ event: 'test' });
+
+    server = await startServer({ ...BASE_OPTIONS, webhookSecrets: secrets });
+    const { status, body } = await makePostRequest(server, '/api/webhooks', payload, {
+      'X-Webhook-Signature': 'sha256=invalid',
+      'X-Webhook-Key-Id': 'key-1',
+    });
+
+    expect(status).toBe(401);
+    expect((body as any).error).toBe('Invalid signature');
+  });
+
+  it('rejects when signature header is missing', async () => {
+    const payload = JSON.stringify({ event: 'test' });
+
+    server = await startServer({ ...BASE_OPTIONS, webhookSecrets: secrets });
+    const { status, body } = await makePostRequest(server, '/api/webhooks', payload, {
+      'X-Webhook-Key-Id': 'key-1',
+    });
+
+    expect(status).toBe(401);
+    expect((body as any).error).toBe('Missing signature header');
+  });
+
+  it('rejects when key-id header is missing', async () => {
+    const payload = JSON.stringify({ event: 'test' });
+    const signature = computeSignature(payload, 'whsec_test_secret');
+
+    server = await startServer({ ...BASE_OPTIONS, webhookSecrets: secrets });
+    const { status, body } = await makePostRequest(server, '/api/webhooks', payload, {
+      'X-Webhook-Signature': signature,
+    });
+
+    expect(status).toBe(401);
+    expect((body as any).error).toBe('Missing key-id header');
+  });
+
+  it('rejects when key-id is unknown', async () => {
+    const payload = JSON.stringify({ event: 'test' });
+    const signature = computeSignature(payload, 'whsec_test_secret');
+
+    server = await startServer({ ...BASE_OPTIONS, webhookSecrets: secrets });
+    const { status, body } = await makePostRequest(server, '/api/webhooks', payload, {
+      'X-Webhook-Signature': signature,
+      'X-Webhook-Key-Id': 'unknown-key',
+    });
+
+    expect(status).toBe(401);
+    expect((body as any).error).toBe('Unknown key-id');
+  });
+
+  it('rejects when no webhook secrets are configured', async () => {
+    const payload = JSON.stringify({ event: 'test' });
+    const signature = computeSignature(payload, 'whsec_test_secret');
+
+    server = await startServer(BASE_OPTIONS);
+    const { status, body } = await makePostRequest(server, '/api/webhooks', payload, {
+      'X-Webhook-Signature': signature,
+      'X-Webhook-Key-Id': 'key-1',
+    });
+
+    expect(status).toBe(401);
+    expect((body as any).error).toBe('Unknown key-id');
+  });
+
+  it('returns 404 for POST to other paths', async () => {
+    const payload = JSON.stringify({ event: 'test' });
+
+    server = await startServer(BASE_OPTIONS);
+    const { status, body } = await makePostRequest(server, '/api/events', payload, {});
+
+    expect(status).toBe(404);
   });
 });

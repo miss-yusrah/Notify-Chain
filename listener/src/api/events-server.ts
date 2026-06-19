@@ -3,12 +3,21 @@ import * as StellarSDK from '@stellar/stellar-sdk';
 import { eventRegistry } from '../store/event-registry';
 import logger from '../utils/logger';
 import { generateRequestId } from '../utils/request-id';
+import {
+  verifySignature,
+  extractSignature,
+  extractKeyId,
+  getSecretForKey,
+  collectRawBody,
+} from '../services/webhook-verifier';
+import { WebhookSecret } from '../types';
 
 export interface EventsServerOptions {
   port: number;
   corsOrigin?: string;
   stellarRpcUrl: string;
   discordWebhookUrl?: string;
+  webhookSecrets?: WebhookSecret[];
 }
 
 type ServiceStatus = 'ok' | 'error' | 'not_configured';
@@ -120,7 +129,7 @@ export function createEventsServer(options: EventsServerOptions): http.Server {
     const startTime = Date.now();
 
     res.setHeader('Access-Control-Allow-Origin', corsOrigin);
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     res.setHeader('X-Request-Id', requestId);
 
@@ -170,6 +179,56 @@ export function createEventsServer(options: EventsServerOptions): http.Server {
         requestId,
         returned: events.length,
         durationMs: Date.now() - startTime,
+      });
+      return;
+    }
+
+    if (req.method === 'POST' && req.url === '/api/webhooks') {
+      collectRawBody(req).then((rawBody) => {
+        const signatureHeader = extractSignature(req.headers);
+        const keyId = extractKeyId(req.headers);
+
+        if (!signatureHeader) {
+          logger.warn('Webhook missing signature header', { requestId });
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing signature header' }));
+          return;
+        }
+
+        if (!keyId) {
+          logger.warn('Webhook missing key-id header', { requestId });
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing key-id header' }));
+          return;
+        }
+
+        const secrets = options.webhookSecrets ?? [];
+        const secret = getSecretForKey(secrets, keyId);
+
+        if (!secret) {
+          logger.warn('Webhook unknown key-id', { requestId, keyId });
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Unknown key-id' }));
+          return;
+        }
+
+        const isValid = verifySignature(rawBody, signatureHeader, secret);
+
+        if (!isValid) {
+          logger.warn('Webhook invalid signature', { requestId, keyId });
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid signature' }));
+          return;
+        }
+
+        logger.info('Webhook received and verified', { requestId, keyId });
+
+        res.writeHead(202, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'accepted' }));
+      }).catch((err) => {
+        logger.error('Failed to read webhook body', { requestId, error: err });
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Failed to read request body' }));
       });
       return;
     }
