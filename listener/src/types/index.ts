@@ -26,5 +26,16 @@ export interface Config {
   eventsApiCorsOrigin: string;
   discord?: DiscordConfig;
   retryQueue?: RetryQueueConfig;
+  scheduler?: SchedulerConfig;
+  databasePath?: string;
+}
+
+export interface SchedulerConfig {
+  enabled: boolean;
+  pollIntervalMs: number;
+  lockTimeoutMs: number;
+  processorId?: string;
+  batchSize: number;
+  timingBufferMs: number;
 }
 

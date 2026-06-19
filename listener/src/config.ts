@@ -99,10 +99,19 @@ export function loadConfig(): Config {
     reconnectDelayMs: parseIntegerEnv('RECONNECT_DELAY_MS', '5000'),
     eventsApiPort: parseIntegerEnv('EVENTS_API_PORT', '8787'),
     eventsApiCorsOrigin: trimEnv('EVENTS_API_CORS_ORIGIN') || 'http://localhost:5173',
+    databasePath: trimEnv('DATABASE_PATH') || './data/notifications.db',
     discord,
     retryQueue: {
       baseDelayMs: parseIntegerEnv('RETRY_BASE_DELAY_MS', '5000'),
       maxRetries: parseIntegerEnv('RETRY_MAX_RETRIES', '5'),
+    },
+    scheduler: {
+      enabled: trimEnv('SCHEDULER_ENABLED') !== 'false',
+      pollIntervalMs: parseIntegerEnv('SCHEDULER_POLL_INTERVAL_MS', '10000'),
+      lockTimeoutMs: parseIntegerEnv('SCHEDULER_LOCK_TIMEOUT_MS', '60000'),
+      processorId: trimEnv('SCHEDULER_PROCESSOR_ID'),
+      batchSize: parseIntegerEnv('SCHEDULER_BATCH_SIZE', '10'),
+      timingBufferMs: parseIntegerEnv('SCHEDULER_TIMING_BUFFER_MS', '60000'),
     },
   };
 }
