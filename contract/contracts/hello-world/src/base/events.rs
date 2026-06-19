@@ -1,4 +1,29 @@
-use soroban_sdk::{contractevent, Address, BytesN};
+use soroban_sdk::{contractevent, contracttype, Address, BytesN};
+
+/// High-level notification category attached to every emitted event.
+///
+/// Off-chain consumers (listeners, indexers, dashboards) often only care about a
+/// subset of the events the contract emits. Each event carries its category as a
+/// trailing, indexed event topic so consumers can subscribe to — or filter out —
+/// whole categories without having to decode the event payload first.
+///
+/// # Backward compatibility
+///
+/// The category is published as the *last* topic of every event, after the event
+/// name and any pre-existing topics. Existing listeners that read the event name
+/// (the first topic) and the previously defined topics/data are unaffected: the
+/// extra trailing topic is simply ignored by consumers that don't look for it.
+#[contracttype]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum NotificationCategory {
+    /// Lifecycle changes to AutoShare groups: created, updated, activated,
+    /// deactivated.
+    Group = 0,
+    /// Administrative / system actions: pause, unpause, admin transfer.
+    Admin = 1,
+    /// Movement of funds: withdrawals.
+    Financial = 2,
+}
 
 /// Emitted when a new AutoShare group is created.
 #[contractevent(data_format = "single-value")]
@@ -6,18 +31,26 @@ use soroban_sdk::{contractevent, Address, BytesN};
 pub struct AutoshareCreated {
     #[topic]
     pub creator: Address,
+    #[topic]
+    pub category: NotificationCategory,
     pub id: BytesN<32>,
 }
 
 /// Emitted when the contract is paused by the admin.
 #[contractevent]
 #[derive(Clone)]
-pub struct ContractPaused {}
+pub struct ContractPaused {
+    #[topic]
+    pub category: NotificationCategory,
+}
 
 /// Emitted when the contract is unpaused by the admin.
 #[contractevent]
 #[derive(Clone)]
-pub struct ContractUnpaused {}
+pub struct ContractUnpaused {
+    #[topic]
+    pub category: NotificationCategory,
+}
 
 /// Emitted when an AutoShare group's member list is updated.
 #[contractevent(data_format = "single-value")]
@@ -25,6 +58,8 @@ pub struct ContractUnpaused {}
 pub struct AutoshareUpdated {
     #[topic]
     pub updater: Address,
+    #[topic]
+    pub category: NotificationCategory,
     pub id: BytesN<32>,
 }
 
@@ -34,6 +69,8 @@ pub struct AutoshareUpdated {
 pub struct GroupDeactivated {
     #[topic]
     pub creator: Address,
+    #[topic]
+    pub category: NotificationCategory,
     pub id: BytesN<32>,
 }
 
@@ -43,6 +80,8 @@ pub struct GroupDeactivated {
 pub struct GroupActivated {
     #[topic]
     pub creator: Address,
+    #[topic]
+    pub category: NotificationCategory,
     pub id: BytesN<32>,
 }
 
@@ -52,6 +91,8 @@ pub struct GroupActivated {
 pub struct AdminTransferred {
     #[topic]
     pub old_admin: Address,
+    #[topic]
+    pub category: NotificationCategory,
     pub new_admin: Address,
 }
 
@@ -63,5 +104,7 @@ pub struct Withdrawal {
     pub token: Address,
     #[topic]
     pub recipient: Address,
+    #[topic]
+    pub category: NotificationCategory,
     pub amount: i128,
 }

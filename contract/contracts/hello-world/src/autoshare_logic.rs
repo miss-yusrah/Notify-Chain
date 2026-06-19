@@ -1,7 +1,7 @@
 use crate::base::errors::Error;
 use crate::base::events::{
     AdminTransferred, AutoshareCreated, AutoshareUpdated, ContractPaused, ContractUnpaused,
-    GroupActivated, GroupDeactivated, Withdrawal,
+    GroupActivated, GroupDeactivated, NotificationCategory, Withdrawal,
 };
 use crate::base::types::{AutoShareDetails, GroupMember, PaymentHistory};
 use soroban_sdk::{contracttype, token, Address, BytesN, Env, String, Vec};
@@ -108,6 +108,7 @@ pub fn create_autoshare(
 
     AutoshareCreated {
         creator: creator.clone(),
+        category: NotificationCategory::Group,
         id: id.clone(),
     }
     .publish(&env);
@@ -275,6 +276,7 @@ pub fn transfer_admin(env: Env, current_admin: Address, new_admin: Address) -> R
     env.storage().persistent().set(&DataKey::Admin, &new_admin);
     AdminTransferred {
         old_admin: current_admin,
+        category: NotificationCategory::Admin,
         new_admin,
     }
     .publish(&env);
@@ -297,7 +299,10 @@ pub fn pause(env: Env, admin: Address) -> Result<(), Error> {
     }
 
     env.storage().persistent().set(&pause_key, &true);
-    ContractPaused {}.publish(&env);
+    ContractPaused {
+        category: NotificationCategory::Admin,
+    }
+    .publish(&env);
     Ok(())
 }
 
@@ -313,7 +318,10 @@ pub fn unpause(env: Env, admin: Address) -> Result<(), Error> {
     }
 
     env.storage().persistent().set(&pause_key, &false);
-    ContractUnpaused {}.publish(&env);
+    ContractUnpaused {
+        category: NotificationCategory::Admin,
+    }
+    .publish(&env);
     Ok(())
 }
 
@@ -646,8 +654,9 @@ pub fn update_members(
     env.storage().persistent().set(&members_key, &new_members);
 
     AutoshareUpdated {
-        id: id.clone(),
         updater: caller,
+        category: NotificationCategory::Group,
+        id: id.clone(),
     }
     .publish(&env);
     Ok(())
@@ -680,8 +689,9 @@ pub fn deactivate_group(env: Env, id: BytesN<32>, caller: Address) -> Result<(),
     env.storage().persistent().set(&key, &details);
 
     GroupDeactivated {
-        id: id.clone(),
         creator: caller,
+        category: NotificationCategory::Group,
+        id: id.clone(),
     }
     .publish(&env);
     Ok(())
@@ -714,8 +724,9 @@ pub fn activate_group(env: Env, id: BytesN<32>, caller: Address) -> Result<(), E
     env.storage().persistent().set(&key, &details);
 
     GroupActivated {
-        id: id.clone(),
         creator: caller,
+        category: NotificationCategory::Group,
+        id: id.clone(),
     }
     .publish(&env);
     Ok(())
@@ -761,8 +772,9 @@ pub fn withdraw(
 
     Withdrawal {
         token,
-        amount,
         recipient,
+        category: NotificationCategory::Financial,
+        amount,
     }
     .publish(&env);
     Ok(())
