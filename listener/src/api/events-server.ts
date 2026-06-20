@@ -4,7 +4,7 @@ import { eventRegistry } from '../store/event-registry';
 import { NotificationAPI } from '../services/notification-api';
 import { NotificationType } from '../types/scheduled-notification';
 import logger from '../utils/logger';
-import { generateRequestId } from '../utils/request-id';
+import { generateRequestId, resolveCorrelationId } from '../utils/request-id';
 import { RateLimitConfig } from '../types';
 import { RateLimiter } from './rate-limiter';
 
@@ -124,12 +124,14 @@ export function createEventsServer(options: EventsServerOptions): http.Server {
 
   const server = http.createServer((req, res) => {
     const requestId = generateRequestId();
+    const correlationId = resolveCorrelationId(req.headers['x-correlation-id']);
     const startTime = Date.now();
 
     res.setHeader('Access-Control-Allow-Origin', corsOrigin);
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-API-Key, Authorization');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-API-Key, Authorization, X-Correlation-Id');
     res.setHeader('X-Request-Id', requestId);
+    res.setHeader('X-Correlation-Id', correlationId);
 
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
@@ -144,7 +146,7 @@ export function createEventsServer(options: EventsServerOptions): http.Server {
           res.writeHead(httpStatus, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(health));
         }).catch((err) => {
-          logger.error('Health check failed unexpectedly', { error: err });
+          logger.error('Health check failed unexpectedly', { error: err, requestId, correlationId });
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ status: 'error', detail: 'Internal health check failure' }));
         });
@@ -158,6 +160,7 @@ export function createEventsServer(options: EventsServerOptions): http.Server {
 
         logger.info('Handling GET /api/events', {
           requestId,
+          correlationId,
           limit: limit ?? 'all',
         });
 
@@ -176,6 +179,7 @@ export function createEventsServer(options: EventsServerOptions): http.Server {
 
         logger.info('GET /api/events complete', {
           requestId,
+          correlationId,
           returned: events.length,
           durationMs: Date.now() - startTime,
         });
@@ -230,11 +234,12 @@ export function createEventsServer(options: EventsServerOptions): http.Server {
 
             logger.info('Notification scheduled via API', {
               requestId,
+              correlationId,
               notificationId,
               executeAt: data.executeAt,
             });
           } catch (error) {
-            logger.error('Failed to schedule notification', { error, requestId });
+            logger.error('Failed to schedule notification', { error, requestId, correlationId });
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: (error as Error).message }));
           }
@@ -256,7 +261,7 @@ export function createEventsServer(options: EventsServerOptions): http.Server {
             res.end(JSON.stringify(stats));
           })
           .catch((error) => {
-            logger.error('Failed to get scheduler stats', { error, requestId });
+            logger.error('Failed to get scheduler stats', { error, requestId, correlationId });
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: (error as Error).message }));
           });
@@ -289,7 +294,7 @@ export function createEventsServer(options: EventsServerOptions): http.Server {
             res.end(JSON.stringify(notification));
           })
           .catch((error) => {
-            logger.error('Failed to get notification', { error, requestId, id });
+            logger.error('Failed to get notification', { error, requestId, correlationId, id });
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: (error as Error).message }));
           });
@@ -298,6 +303,7 @@ export function createEventsServer(options: EventsServerOptions): http.Server {
 
       logger.warn('Unhandled request', {
         requestId,
+        correlationId,
         method: req.method,
         url: req.url,
       });
@@ -314,7 +320,7 @@ export function createEventsServer(options: EventsServerOptions): http.Server {
           }
         })
         .catch((err) => {
-          logger.error('Rate limiter execution error', { error: err, requestId });
+          logger.error('Rate limiter execution error', { error: err, requestId, correlationId });
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Internal server error' }));
         });
