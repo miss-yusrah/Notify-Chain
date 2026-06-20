@@ -255,7 +255,7 @@ describe('NotificationScheduler', () => {
       expect(notification!.status).toBe(NotificationStatus.PENDING);
     });
 
-    test('should reject past execution time', async () => {
+    test('should reject expired execution time', async () => {
       const pastDate = new Date(Date.now() - 60000);
 
       await expect(
@@ -265,7 +265,45 @@ describe('NotificationScheduler', () => {
           targetRecipient: 'test-webhook',
           executeAt: pastDate,
         })
-      ).rejects.toThrow('executeAt must be a future date');
+      ).rejects.toThrow('executeAt must be a future timestamp — the provided date has already expired');
+    });
+
+    test('should reject execution time equal to now', async () => {
+      // A timestamp at (or just before) the current moment is already expired
+      const now = new Date();
+
+      await expect(
+        api.scheduleNotification({
+          payload: { message: 'Test' },
+          notificationType: NotificationType.DISCORD,
+          targetRecipient: 'test-webhook',
+          executeAt: now,
+        })
+      ).rejects.toThrow('executeAt must be a future timestamp');
+    });
+
+    test('should reject invalid date object', async () => {
+      await expect(
+        api.scheduleNotification({
+          payload: { message: 'Test' },
+          notificationType: NotificationType.DISCORD,
+          targetRecipient: 'test-webhook',
+          executeAt: new Date('not-a-date'),
+        })
+      ).rejects.toThrow('executeAt must be a valid date');
+    });
+
+    test('should accept execution time 1 second in the future', async () => {
+      const nearFuture = new Date(Date.now() + 1000);
+
+      const id = await api.scheduleNotification({
+        payload: { message: 'Test' },
+        notificationType: NotificationType.DISCORD,
+        targetRecipient: 'test-webhook',
+        executeAt: nearFuture,
+      });
+
+      expect(id).toBeGreaterThan(0);
     });
 
     test('should schedule Discord notification', async () => {

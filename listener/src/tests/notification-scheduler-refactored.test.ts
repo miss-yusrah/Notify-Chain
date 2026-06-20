@@ -258,7 +258,7 @@ describe('NotificationScheduler (Refactored)', () => {
 
       await expect(
         api.scheduleNotification(pastInput)
-      ).rejects.toThrow('executeAt must be a future date');
+      ).rejects.toThrow('executeAt must be a future timestamp');
     });
 
     test('should schedule Discord notification', async () => {

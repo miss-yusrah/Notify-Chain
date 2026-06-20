@@ -17,8 +17,12 @@ export class NotificationAPI {
     requestId?: string
   ): Promise<number> {
     // Validate input
-    if (!input.executeAt || input.executeAt < new Date()) {
-      throw new Error('executeAt must be a future date');
+    if (!input.executeAt || !(input.executeAt instanceof Date) || isNaN(input.executeAt.getTime())) {
+      throw new Error('executeAt must be a valid date');
+    }
+
+    if (input.executeAt <= new Date()) {
+      throw new Error('executeAt must be a future timestamp — the provided date has already expired');
     }
 
     if (!input.payload || typeof input.payload !== 'object') {

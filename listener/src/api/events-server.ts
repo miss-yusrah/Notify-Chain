@@ -206,11 +206,18 @@ export function createEventsServer(options: EventsServerOptions): http.Server {
               return;
             }
 
+            const executeAt = new Date(data.executeAt);
+            if (isNaN(executeAt.getTime())) {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'executeAt is not a valid date' }));
+              return;
+            }
+
             const notificationId = await options.notificationAPI!.scheduleNotification({
               payload: data.payload,
               notificationType: data.notificationType || NotificationType.DISCORD,
               targetRecipient: data.targetRecipient,
-              executeAt: new Date(data.executeAt),
+              executeAt,
               maxRetries: data.maxRetries,
               priority: data.priority,
               eventId: data.eventId,
