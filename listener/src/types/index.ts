@@ -1,6 +1,8 @@
 export interface ContractConfig {
   address: string;
   events: string[];
+  /** Optional user ID for per-user notification preference gating */
+  userId?: string;
 }
 
 export interface DiscordConfig {
@@ -15,6 +17,11 @@ export interface RetryQueueConfig {
   maxRetries?: number;
 }
 
+export interface WebhookSecret {
+  id: string;
+  secret: string;
+}  
+  
 export interface RateLimitConfig {
   enabled: boolean;
   windowMs: number;
@@ -33,6 +40,7 @@ export interface Config {
   eventsApiCorsOrigin: string;
   discord?: DiscordConfig;
   retryQueue?: RetryQueueConfig;
+  webhookSecrets?: WebhookSecret[];
   scheduler?: SchedulerConfig;
   databasePath?: string;
   rateLimit?: RateLimitConfig;

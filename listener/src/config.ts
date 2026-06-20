@@ -1,4 +1,4 @@
-import { Config, ContractConfig, DiscordConfig } from './types';
+import { Config, ContractConfig, DiscordConfig, WebhookSecret } from './types';
 
 export class ConfigError extends Error {
   constructor(message: string) {
@@ -85,9 +85,37 @@ function loadDiscordConfig(): DiscordConfig | undefined {
   };
 }
 
+function validateWebhookSecrets(value: unknown): WebhookSecret[] {
+  if (!Array.isArray(value)) {
+    throw new ConfigError('WEBHOOK_SECRETS must be a JSON array of secret objects.');
+  }
+
+  return value.map((item, index) => {
+    if (typeof item !== 'object' || item === null) {
+      throw new ConfigError(
+        `WEBHOOK_SECRETS[${index}] must be an object with id and secret.`
+      );
+    }
+
+    const id = (item as any).id;
+    const secret = (item as any).secret;
+
+    if (typeof id !== 'string' || !id.trim()) {
+      throw new ConfigError(`WEBHOOK_SECRETS[${index}].id must be a non-empty string.`);
+    }
+
+    if (typeof secret !== 'string' || !secret.trim()) {
+      throw new ConfigError(`WEBHOOK_SECRETS[${index}].secret must be a non-empty string.`);
+    }
+
+    return { id: id.trim(), secret: secret.trim() };
+  });
+}
+
 export function loadConfig(): Config {
   const discord = loadDiscordConfig();
   const rawContractAddresses = parseJsonEnv<unknown>('CONTRACT_ADDRESSES', '[]');
+  const rawWebhookSecrets = parseJsonEnv<unknown>('WEBHOOK_SECRETS', '[]');
   const clientOverrides = parseJsonEnv<Record<string, { maxRequests: number; windowMs?: number }>>(
     'RATE_LIMIT_CLIENT_OVERRIDES',
     '{}'
@@ -109,6 +137,7 @@ export function loadConfig(): Config {
       baseDelayMs: parseIntegerEnv('RETRY_BASE_DELAY_MS', '5000'),
       maxRetries: parseIntegerEnv('RETRY_MAX_RETRIES', '5'),
     },
+    webhookSecrets: validateWebhookSecrets(rawWebhookSecrets),
     scheduler: {
       enabled: trimEnv('SCHEDULER_ENABLED') !== 'false',
       pollIntervalMs: parseIntegerEnv('SCHEDULER_POLL_INTERVAL_MS', '10000'),

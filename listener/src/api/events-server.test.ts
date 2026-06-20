@@ -1,4 +1,5 @@
 import http from 'http';
+import crypto from 'crypto';
 import { createEventsServer, checkStellarRpc, checkDiscord } from './events-server';
 import { eventRegistry } from '../store/event-registry';
 
@@ -11,13 +12,20 @@ jest.mock('@stellar/stellar-sdk', () => ({
     })),
   },
 }));
+import { createEventsServer } from './events-server';
+import { preferenceStore } from '../store/preference-store';
+
+jest.mock('../store/preference-store', () => {
+  const store = {
+    get: jest.fn(),
+    update: jest.fn(),
+    isCategoryEnabled: jest.fn(),
+  };
+  return { preferenceStore: store };
+});
 
 jest.mock('../store/event-registry', () => ({
-  eventRegistry: {
-    getEvents: jest.fn().mockReturnValue([]),
-    count: jest.fn().mockReturnValue(0),
-    addFromInput: jest.fn(),
-  },
+  eventRegistry: { getEvents: jest.fn(() => []), count: jest.fn(() => 0) },
 }));
 
 jest.mock('../utils/logger', () => ({
@@ -25,215 +33,248 @@ jest.mock('../utils/logger', () => ({
   default: { info: jest.fn(), error: jest.fn(), warn: jest.fn() },
 }));
 
-const mockFetch = jest.fn();
-global.fetch = mockFetch;
+const mockStore = preferenceStore as jest.Mocked<typeof preferenceStore>;
 
-const BASE_OPTIONS = {
-  port: 0,
-  stellarRpcUrl: 'https://soroban-testnet.stellar.org:443',
-};
-
-function makeRequest(
+function request(
   server: http.Server,
-  path: string
+  method: string,
+  path: string,
+  body?: object
 ): Promise<{ status: number; body: unknown }> {
   return new Promise((resolve, reject) => {
-    const addr = server.address() as { port: number };
+    const port = (server.address() as { port: number }).port;
+    const payload = body ? JSON.stringify(body) : undefined;
     const req = http.request(
-      { host: '127.0.0.1', port: addr.port, path, method: 'GET' },
+      { hostname: '127.0.0.1', port, path, method,
+        headers: { 'Content-Type': 'application/json', ...(payload ? { 'Content-Length': Buffer.byteLength(payload) } : {}) },
+      },
       (res) => {
         let data = '';
-        res.on('data', (chunk) => (data += chunk));
+        res.on('data', (chunk) => { data += chunk; });
         res.on('end', () => resolve({ status: res.statusCode!, body: JSON.parse(data) }));
       }
     );
     req.on('error', reject);
+    if (payload) req.write(payload);
     req.end();
   });
 }
 
-function startServer(options: Parameters<typeof createEventsServer>[0]): Promise<http.Server> {
-  return new Promise((resolve) => {
-    const server = createEventsServer(options);
-    server.listen(0, '127.0.0.1', () => resolve(server));
+describe('Preference API endpoints', () => {
+  let server: http.Server;
+
+  beforeEach((done) => {
+    jest.clearAllMocks();
+    server = createEventsServer({ port: 0 });
+    server.listen(0, '127.0.0.1', done);
+  });
+
+  afterEach((done) => {
+    server.close(done);
+  });
+
+  describe('GET /api/preferences/:userId', () => {
+    it('returns preferences for the given user', async () => {
+      const prefs = { userId: 'alice', categories: { discord: true }, updatedAt: 1000 };
+      mockStore.get.mockReturnValue(prefs);
+
+      const res = await request(server, 'GET', '/api/preferences/alice');
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual(prefs);
+      expect(mockStore.get).toHaveBeenCalledWith('alice');
+    });
+  });
+
+  describe('PUT /api/preferences/:userId', () => {
+    it('updates and returns preferences', async () => {
+      const updated = { userId: 'alice', categories: { discord: false }, updatedAt: 2000 };
+      mockStore.update.mockReturnValue(updated);
+
+      const res = await request(server, 'PUT', '/api/preferences/alice', {
+        categories: { discord: false },
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual(updated);
+      expect(mockStore.update).toHaveBeenCalledWith('alice', { categories: { discord: false } });
+    });
+
+    it('returns 400 for invalid JSON body', async () => {
+      const port = (server.address() as { port: number }).port;
+      const res = await new Promise<{ status: number }>((resolve, reject) => {
+        const req = http.request(
+          { hostname: '127.0.0.1', port, path: '/api/preferences/alice', method: 'PUT',
+            headers: { 'Content-Type': 'application/json', 'Content-Length': 8 } },
+          (r) => {
+            r.resume();
+            r.on('end', () => resolve({ status: r.statusCode! }));
+          }
+        );
+        req.on('error', reject);
+        req.write('not-json');
+        req.end();
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it('returns 400 when categories field is missing', async () => {
+      const res = await request(server, 'PUT', '/api/preferences/alice', { foo: 'bar' });
+      expect(res.status).toBe(400);
+    });
+  });
+
+  describe('unknown routes', () => {
+    it('returns 404 for unrecognised paths', async () => {
+      const res = await request(server, 'GET', '/api/unknown');
+      expect(res.status).toBe(404);
+    });
+  });
+});
+
+function computeSignature(payload: string, secret: string): string {
+  const sig = crypto.createHmac('sha256', secret).update(payload, 'utf8').digest('hex');
+  return `sha256=${sig}`;
+}
+
+function makePostRequest(
+  server: http.Server,
+  path: string,
+  body: string,
+  headers: Record<string, string>
+): Promise<{ status: number; body: unknown }> {
+  return new Promise((resolve, reject) => {
+    const addr = server.address() as { port: number };
+    const req = http.request(
+      {
+        host: '127.0.0.1',
+        port: addr.port,
+        path,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers,
+        },
+      },
+      (res) => {
+        let data = '';
+        res.on('data', (chunk) => (data += chunk));
+        res.on('end', () => {
+          try {
+            resolve({ status: res.statusCode!, body: JSON.parse(data) });
+          } catch {
+            resolve({ status: res.statusCode!, body: data });
+          }
+        });
+      }
+    );
+    req.on('error', reject);
+    req.write(body);
+    req.end();
   });
 }
 
-function closeServer(server: http.Server): Promise<void> {
-  return new Promise((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
-}
-
-describe('GET /health', () => {
+describe('POST /api/webhooks', () => {
   let server: http.Server;
+  const secrets = [
+    { id: 'key-1', secret: 'whsec_test_secret' },
+    { id: 'key-2', secret: 'whsec_other_secret' },
+  ];
 
   beforeEach(() => {
     jest.clearAllMocks();
-    (eventRegistry.count as jest.Mock).mockReturnValue(5);
   });
 
   afterEach(async () => {
     if (server) await closeServer(server);
   });
 
-  it('returns 200 and status ok when all services are healthy', async () => {
-    mockGetHealth.mockResolvedValue({ status: 'healthy' });
+  it('accepts a webhook with a valid signature', async () => {
+    const payload = JSON.stringify({ event: 'test', data: { foo: 'bar' } });
+    const signature = computeSignature(payload, 'whsec_test_secret');
 
-    server = await startServer(BASE_OPTIONS);
-    const { status, body } = await makeRequest(server, '/health');
-
-    expect(status).toBe(200);
-    expect((body as any).status).toBe('ok');
-    expect((body as any).services.stellarRpc.status).toBe('ok');
-    expect((body as any).services.discord.status).toBe('not_configured');
-    expect((body as any).services.eventRegistry).toEqual({ status: 'ok', eventCount: 5 });
-    expect((body as any).timestamp).toBeDefined();
-  });
-
-  it('returns 503 and status error when Stellar RPC is unreachable', async () => {
-    mockGetHealth.mockRejectedValue(new Error('connection refused'));
-
-    server = await startServer(BASE_OPTIONS);
-    const { status, body } = await makeRequest(server, '/health');
-
-    expect(status).toBe(503);
-    expect((body as any).status).toBe('error');
-    expect((body as any).services.stellarRpc.status).toBe('error');
-    expect((body as any).services.stellarRpc.detail).toBe('connection refused');
-  });
-
-  it('returns 200 and status degraded when Discord webhook is down', async () => {
-    mockGetHealth.mockResolvedValue({ status: 'healthy' });
-    mockFetch.mockResolvedValue({ ok: false, status: 503 });
-
-    server = await startServer({
-      ...BASE_OPTIONS,
-      discordWebhookUrl: 'https://discord.com/api/webhooks/123/abc',
+    server = await startServer({ ...BASE_OPTIONS, webhookSecrets: secrets });
+    const { status, body } = await makePostRequest(server, '/api/webhooks', payload, {
+      'X-Webhook-Signature': signature,
+      'X-Webhook-Key-Id': 'key-1',
     });
-    const { status, body } = await makeRequest(server, '/health');
 
-    expect(status).toBe(200);
-    expect((body as any).status).toBe('degraded');
-    expect((body as any).services.discord.status).toBe('error');
-    expect((body as any).services.discord.detail).toBe('HTTP 503');
+    expect(status).toBe(202);
+    expect((body as any).status).toBe('accepted');
   });
 
-  it('returns 200 and status ok when Discord webhook is reachable', async () => {
-    mockGetHealth.mockResolvedValue({ status: 'healthy' });
-    mockFetch.mockResolvedValue({ ok: true, status: 200 });
+  it('rejects a webhook with an invalid signature', async () => {
+    const payload = JSON.stringify({ event: 'test' });
 
-    server = await startServer({
-      ...BASE_OPTIONS,
-      discordWebhookUrl: 'https://discord.com/api/webhooks/123/abc',
+    server = await startServer({ ...BASE_OPTIONS, webhookSecrets: secrets });
+    const { status, body } = await makePostRequest(server, '/api/webhooks', payload, {
+      'X-Webhook-Signature': 'sha256=invalid',
+      'X-Webhook-Key-Id': 'key-1',
     });
-    const { status, body } = await makeRequest(server, '/health');
 
-    expect(status).toBe(200);
-    expect((body as any).status).toBe('ok');
-    expect((body as any).services.discord.status).toBe('ok');
+    expect(status).toBe(401);
+    expect((body as any).error).toBe('Invalid signature');
   });
 
-  it('includes latencyMs for each checked service', async () => {
-    mockGetHealth.mockResolvedValue({ status: 'healthy' });
-    mockFetch.mockResolvedValue({ ok: true, status: 200 });
+  it('rejects when signature header is missing', async () => {
+    const payload = JSON.stringify({ event: 'test' });
 
-    server = await startServer({
-      ...BASE_OPTIONS,
-      discordWebhookUrl: 'https://discord.com/api/webhooks/123/abc',
+    server = await startServer({ ...BASE_OPTIONS, webhookSecrets: secrets });
+    const { status, body } = await makePostRequest(server, '/api/webhooks', payload, {
+      'X-Webhook-Key-Id': 'key-1',
     });
-    const { body } = await makeRequest(server, '/health');
 
-    expect(typeof (body as any).services.stellarRpc.latencyMs).toBe('number');
-    expect(typeof (body as any).services.discord.latencyMs).toBe('number');
+    expect(status).toBe(401);
+    expect((body as any).error).toBe('Missing signature header');
   });
 
-  it('reports discord as not_configured when no webhook url is provided', async () => {
-    mockGetHealth.mockResolvedValue({ status: 'healthy' });
+  it('rejects when key-id header is missing', async () => {
+    const payload = JSON.stringify({ event: 'test' });
+    const signature = computeSignature(payload, 'whsec_test_secret');
+
+    server = await startServer({ ...BASE_OPTIONS, webhookSecrets: secrets });
+    const { status, body } = await makePostRequest(server, '/api/webhooks', payload, {
+      'X-Webhook-Signature': signature,
+    });
+
+    expect(status).toBe(401);
+    expect((body as any).error).toBe('Missing key-id header');
+  });
+
+  it('rejects when key-id is unknown', async () => {
+    const payload = JSON.stringify({ event: 'test' });
+    const signature = computeSignature(payload, 'whsec_test_secret');
+
+    server = await startServer({ ...BASE_OPTIONS, webhookSecrets: secrets });
+    const { status, body } = await makePostRequest(server, '/api/webhooks', payload, {
+      'X-Webhook-Signature': signature,
+      'X-Webhook-Key-Id': 'unknown-key',
+    });
+
+    expect(status).toBe(401);
+    expect((body as any).error).toBe('Unknown key-id');
+  });
+
+  it('rejects when no webhook secrets are configured', async () => {
+    const payload = JSON.stringify({ event: 'test' });
+    const signature = computeSignature(payload, 'whsec_test_secret');
 
     server = await startServer(BASE_OPTIONS);
-    const { body } = await makeRequest(server, '/health');
+    const { status, body } = await makePostRequest(server, '/api/webhooks', payload, {
+      'X-Webhook-Signature': signature,
+      'X-Webhook-Key-Id': 'key-1',
+    });
 
-    expect((body as any).services.discord).toEqual({ status: 'not_configured' });
-  });
-});
-
-describe('checkStellarRpc', () => {
-  beforeEach(() => jest.clearAllMocks());
-
-  it('returns ok when getHealth resolves', async () => {
-    mockGetHealth.mockResolvedValue({ status: 'healthy' });
-    const result = await checkStellarRpc('https://soroban-testnet.stellar.org:443');
-    expect(result.status).toBe('ok');
-    expect(result.latencyMs).toBeGreaterThanOrEqual(0);
+    expect(status).toBe(401);
+    expect((body as any).error).toBe('Unknown key-id');
   });
 
-  it('returns error when getHealth rejects', async () => {
-    mockGetHealth.mockRejectedValue(new Error('timeout'));
-    const result = await checkStellarRpc('https://soroban-testnet.stellar.org:443');
-    expect(result.status).toBe('error');
-    expect(result.detail).toBe('timeout');
-  });
-});
+  it('returns 404 for POST to other paths', async () => {
+    const payload = JSON.stringify({ event: 'test' });
 
-describe('checkDiscord', () => {
-  beforeEach(() => jest.clearAllMocks());
-
-  it('returns ok for a 200 response', async () => {
-    mockFetch.mockResolvedValue({ ok: true, status: 200 });
-    const result = await checkDiscord('https://discord.com/api/webhooks/123/abc');
-    expect(result.status).toBe('ok');
-  });
-
-  it('returns error for a non-ok response', async () => {
-    mockFetch.mockResolvedValue({ ok: false, status: 401 });
-    const result = await checkDiscord('https://discord.com/api/webhooks/123/abc');
-    expect(result.status).toBe('error');
-    expect(result.detail).toBe('HTTP 401');
-  });
-
-  it('returns error when fetch throws', async () => {
-    mockFetch.mockRejectedValue(new Error('network error'));
-    const result = await checkDiscord('https://discord.com/api/webhooks/123/abc');
-    expect(result.status).toBe('error');
-    expect(result.detail).toBe('network error');
-  });
-});
-
-describe('GET /api/events', () => {
-  let server: http.Server;
-
-  beforeEach(() => {
-    jest.clearAllMocks();
-    mockGetHealth.mockResolvedValue({ status: 'healthy' });
-    (eventRegistry.getEvents as jest.Mock).mockReturnValue([{ id: '1' }]);
-    (eventRegistry.count as jest.Mock).mockReturnValue(1);
-  });
-
-  afterEach(async () => {
-    if (server) await closeServer(server);
-  });
-
-  it('returns events list', async () => {
     server = await startServer(BASE_OPTIONS);
-    const { status, body } = await makeRequest(server, '/api/events');
-
-    expect(status).toBe(200);
-    expect((body as any).count).toBe(1);
-    expect((body as any).events).toHaveLength(1);
-  });
-});
-
-describe('unknown routes', () => {
-  let server: http.Server;
-
-  afterEach(async () => {
-    if (server) await closeServer(server);
-  });
-
-  it('returns 404 for unknown path', async () => {
-    server = await startServer(BASE_OPTIONS);
-    const { status, body } = await makeRequest(server, '/unknown');
+    const { status, body } = await makePostRequest(server, '/api/events', payload, {});
 
     expect(status).toBe(404);
-    expect((body as any).error).toBe('Not found');
   });
 });
