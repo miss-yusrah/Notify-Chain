@@ -3,12 +3,14 @@ import { Config, ContractConfig } from '../types';
 import { eventRegistry } from '../store/event-registry';
 import { preferenceStore } from '../store/preference-store';
 import logger from '../utils/logger';
+import { generateRequestId } from '../utils/request-id';
 import {
   getEventName,
   matchesEventFilter,
   validateEventPayload,
 } from '../utils/event-utils';
 import { DiscordNotificationService } from './discord-notification';
+import { NotificationRetryQueue } from './notification-retry-queue';
 
 export class EventSubscriber {
   private config: Config;
@@ -17,40 +19,66 @@ export class EventSubscriber {
   private reconnectAttempts: number = 0;
   private lastCursors: Map<string, string> = new Map();
   private discordService: DiscordNotificationService | null = null;
+  private retryQueue: NotificationRetryQueue | null = null;
 
   constructor(config: Config) {
     this.config = config;
     this.server = new StellarSDK.rpc.Server(config.stellarRpcUrl);
     if (config.discord) {
       this.discordService = new DiscordNotificationService(config.discord);
+      this.retryQueue = new NotificationRetryQueue(
+        (event, contractConfig, requestId) =>
+          this.discordService!.sendEventNotification(event, contractConfig, requestId),
+        config.retryQueue
+      );
     }
   }
 
   async start(): Promise<void> {
+    if (this.isRunning) {
+      logger.warn('Event subscriber already running');
+      return;
+    }
+
     this.isRunning = true;
     logger.info('Starting event subscriber service');
+    this.retryQueue?.start();
     this.poll();
   }
 
   async stop(): Promise<void> {
     this.isRunning = false;
+    this.retryQueue?.stop();
     logger.info('Stopping event subscriber service');
   }
 
   private async poll(): Promise<void> {
     while (this.isRunning) {
+      const requestId = generateRequestId();
+      const pollStart = Date.now();
+
       try {
-        await this.checkForEvents();
+        await this.checkForEvents(requestId);
         this.reconnectAttempts = 0;
+
+        logger.info('Poll cycle complete', {
+          requestId,
+          durationMs: Date.now() - pollStart,
+        });
+
         await this.delay(this.config.pollIntervalMs);
       } catch (error) {
-        logger.error('Error polling for events', { error });
-        await this.handleReconnection();
+        logger.error('Error polling for events', {
+          requestId,
+          error,
+          durationMs: Date.now() - pollStart,
+        });
+        await this.handleReconnection(requestId);
       }
     }
   }
 
-  private async checkForEvents(): Promise<void> {
+  private async checkForEvents(requestId: string = generateRequestId()): Promise<void> {
     const totalContracts = this.config.contractAddresses.length;
     let failureCount = 0;
 
@@ -59,11 +87,12 @@ export class EventSubscriber {
         const response = await this.getContractEvents(contractConfig);
         const events = response.events || [];
         const processableEvents = events.filter((event) =>
-          this.shouldProcessEvent(event, contractConfig)
+          this.shouldProcessEvent(event, contractConfig, requestId)
         );
 
         if (events.length > 0) {
           logger.info('Received events', {
+            requestId,
             contractAddress: contractConfig.address,
             count: events.length,
             processed: processableEvents.length,
@@ -71,7 +100,7 @@ export class EventSubscriber {
         }
 
         for (const event of processableEvents) {
-          await this.processEvent(event, contractConfig);
+          await this.processEvent(event, contractConfig, requestId);
         }
 
         if (response.cursor) {
@@ -80,6 +109,7 @@ export class EventSubscriber {
       } catch (error) {
         failureCount++;
         logger.error('Error fetching events for contract', {
+          requestId,
           contractAddress: contractConfig.address,
           error,
         });
@@ -95,11 +125,13 @@ export class EventSubscriber {
 
   private shouldProcessEvent(
     event: StellarSDK.rpc.Api.EventResponse,
-    contractConfig: ContractConfig
+    contractConfig: ContractConfig,
+    requestId: string = ''
   ): boolean {
     const validation = validateEventPayload(event);
     if (!validation.valid) {
       logger.warn('Skipping invalid event payload', {
+        requestId,
         contractAddress: contractConfig.address,
         eventId: event.id,
         reason: validation.reason,
@@ -146,8 +178,10 @@ export class EventSubscriber {
 
   private async processEvent(
     event: StellarSDK.rpc.Api.EventResponse,
-    contractConfig: ContractConfig
+    contractConfig: ContractConfig,
+    requestId: string = ''
   ): Promise<void> {
+    const eventStart = Date.now();
     const eventName = getEventName(event.topic);
     const displayEvent = eventRegistry.addFromInput({
       eventId: event.id,
@@ -161,6 +195,7 @@ export class EventSubscriber {
     });
 
     logger.info('Processing event', {
+      requestId,
       contractAddress: displayEvent.contractAddress,
       eventId: displayEvent.eventId,
       eventName: displayEvent.eventName,
@@ -182,17 +217,26 @@ export class EventSubscriber {
 
       const success = await this.discordService.sendEventNotification(
         event,
-        contractConfig
+        contractConfig,
+        requestId
       );
-      if (!success) {
-        logger.warn('Failed to send Discord notification, event will still be processed', {
+      if (!success && this.retryQueue) {
+        logger.warn('Discord notification failed, adding to retry queue', {
+          requestId,
           eventId: event.id,
         });
+        this.retryQueue.enqueue(event, contractConfig, requestId);
       }
     }
+
+    logger.info('Event processing complete', {
+      requestId,
+      eventId: event.id,
+      durationMs: Date.now() - eventStart,
+    });
   }
 
-  private async handleReconnection(): Promise<void> {
+  private async handleReconnection(requestId?: string): Promise<void> {
     if (this.reconnectAttempts >= this.config.maxReconnectAttempts) {
       logger.error('Max reconnection attempts exceeded, stopping service');
       this.stop();
@@ -202,6 +246,7 @@ export class EventSubscriber {
     this.reconnectAttempts++;
     const delay = this.config.reconnectDelayMs * this.reconnectAttempts;
     logger.warn('Attempting to reconnect', {
+      requestId,
       attempt: this.reconnectAttempts,
       delayMs: delay,
     });

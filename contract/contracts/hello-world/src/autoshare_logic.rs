@@ -1,10 +1,15 @@
 use crate::base::errors::Error;
 use crate::base::events::{
-    AdminTransferred, AutoshareCreated, AutoshareUpdated, ContractPaused, ContractUnpaused,
-    GroupActivated, GroupDeactivated, Withdrawal,
+    AdminTransferred, AuthorizationFailure, AutoshareCreated, AutoshareUpdated, ContractPaused,
+    ContractUnpaused, GroupActivated, GroupDeactivated, NotificationCategory, Withdrawal,
 };
 use crate::base::types::{AutoShareDetails, GroupMember, PaymentHistory};
 use soroban_sdk::{contracttype, token, Address, BytesN, Env, String, Vec};
+
+/// Maximum allowed length for AutoShare group names.
+const MAX_NAME_LENGTH: u32 = 100;
+/// Maximum number of members allowed per AutoShare group.
+const MAX_MEMBERS: u32 = 50;
 
 #[contracttype]
 pub enum DataKey {
@@ -44,6 +49,11 @@ pub fn create_autoshare(
     // Validate usage count
     if usage_count == 0 {
         return Err(Error::InvalidUsageCount);
+    }
+
+    // Validate name length
+    if name.len() > MAX_NAME_LENGTH {
+        return Err(Error::NameTooLong);
     }
 
     // Verify token is supported
@@ -98,6 +108,7 @@ pub fn create_autoshare(
 
     AutoshareCreated {
         creator: creator.clone(),
+        category: NotificationCategory::Group,
         id: id.clone(),
     }
     .publish(&env);
@@ -172,9 +183,12 @@ pub fn get_group_members(env: Env, id: BytesN<32>) -> Result<Vec<GroupMember>, E
 pub fn add_group_member(
     env: Env,
     id: BytesN<32>,
+    caller: Address,
     address: Address,
     percentage: u32,
 ) -> Result<(), Error> {
+    caller.require_auth();
+
     // Check if contract is paused
     if get_paused_status(&env) {
         return Err(Error::ContractPaused);
@@ -187,11 +201,21 @@ pub fn add_group_member(
         .get(&key)
         .ok_or(Error::NotFound)?;
 
+    if details.creator != caller {
+        publish_authorization_failure(&env, &caller, "add_group_member");
+        return Err(Error::Unauthorized);
+    }
+
     // Check if already a member
     for member in details.members.iter() {
         if member.address == address {
             return Err(Error::AlreadyExists);
         }
+    }
+
+    // Validate member count limit
+    if details.members.len() >= MAX_MEMBERS {
+        return Err(Error::TooManyMembers);
     }
 
     // Add new member
@@ -231,6 +255,15 @@ pub fn initialize_admin(env: Env, admin: Address) {
     }
 }
 
+fn publish_authorization_failure(env: &Env, caller: &Address, action: &str) {
+    AuthorizationFailure {
+        caller: caller.clone(),
+        category: NotificationCategory::Admin,
+        action: String::from_str(env, action),
+    }
+    .publish(env);
+}
+
 fn require_admin(env: &Env, caller: &Address) -> Result<(), Error> {
     let admin_key = DataKey::Admin;
     let admin: Address = env
@@ -240,6 +273,7 @@ fn require_admin(env: &Env, caller: &Address) -> Result<(), Error> {
         .ok_or(Error::Unauthorized)?;
 
     if admin != *caller {
+        publish_authorization_failure(env, caller, "require_admin");
         return Err(Error::Unauthorized);
     }
 
@@ -260,6 +294,7 @@ pub fn transfer_admin(env: Env, current_admin: Address, new_admin: Address) -> R
     env.storage().persistent().set(&DataKey::Admin, &new_admin);
     AdminTransferred {
         old_admin: current_admin,
+        category: NotificationCategory::Admin,
         new_admin,
     }
     .publish(&env);
@@ -282,7 +317,10 @@ pub fn pause(env: Env, admin: Address) -> Result<(), Error> {
     }
 
     env.storage().persistent().set(&pause_key, &true);
-    ContractPaused {}.publish(&env);
+    ContractPaused {
+        category: NotificationCategory::Admin,
+    }
+    .publish(&env);
     Ok(())
 }
 
@@ -298,7 +336,10 @@ pub fn unpause(env: Env, admin: Address) -> Result<(), Error> {
     }
 
     env.storage().persistent().set(&pause_key, &false);
-    ContractUnpaused {}.publish(&env);
+    ContractUnpaused {
+        category: NotificationCategory::Admin,
+    }
+    .publish(&env);
     Ok(())
 }
 
@@ -587,6 +628,7 @@ pub fn update_members(
         .ok_or(Error::NotFound)?;
 
     if details.creator != caller {
+        publish_authorization_failure(&env, &caller, "update_members");
         return Err(Error::Unauthorized);
     }
 
@@ -597,6 +639,11 @@ pub fn update_members(
     // Validate new members
     if new_members.is_empty() {
         return Err(Error::EmptyMembers);
+    }
+
+    // Validate member count limit
+    if new_members.len() > MAX_MEMBERS {
+        return Err(Error::TooManyMembers);
     }
 
     let mut total_percentage: u32 = 0;
@@ -626,8 +673,9 @@ pub fn update_members(
     env.storage().persistent().set(&members_key, &new_members);
 
     AutoshareUpdated {
-        id: id.clone(),
         updater: caller,
+        category: NotificationCategory::Group,
+        id: id.clone(),
     }
     .publish(&env);
     Ok(())
@@ -649,6 +697,7 @@ pub fn deactivate_group(env: Env, id: BytesN<32>, caller: Address) -> Result<(),
         .ok_or(Error::NotFound)?;
 
     if details.creator != caller {
+        publish_authorization_failure(&env, &caller, "deactivate_group");
         return Err(Error::Unauthorized);
     }
 
@@ -660,8 +709,9 @@ pub fn deactivate_group(env: Env, id: BytesN<32>, caller: Address) -> Result<(),
     env.storage().persistent().set(&key, &details);
 
     GroupDeactivated {
-        id: id.clone(),
         creator: caller,
+        category: NotificationCategory::Group,
+        id: id.clone(),
     }
     .publish(&env);
     Ok(())
@@ -683,6 +733,7 @@ pub fn activate_group(env: Env, id: BytesN<32>, caller: Address) -> Result<(), E
         .ok_or(Error::NotFound)?;
 
     if details.creator != caller {
+        publish_authorization_failure(&env, &caller, "activate_group");
         return Err(Error::Unauthorized);
     }
 
@@ -694,8 +745,9 @@ pub fn activate_group(env: Env, id: BytesN<32>, caller: Address) -> Result<(), E
     env.storage().persistent().set(&key, &details);
 
     GroupActivated {
-        id: id.clone(),
         creator: caller,
+        category: NotificationCategory::Group,
+        id: id.clone(),
     }
     .publish(&env);
     Ok(())
@@ -741,8 +793,9 @@ pub fn withdraw(
 
     Withdrawal {
         token,
-        amount,
         recipient,
+        category: NotificationCategory::Financial,
+        amount,
     }
     .publish(&env);
     Ok(())
@@ -751,6 +804,10 @@ pub fn withdraw(
 fn validate_members(members: &Vec<GroupMember>) -> Result<(), Error> {
     if members.is_empty() {
         return Err(Error::EmptyMembers);
+    }
+    // Validate member count limit
+    if members.len() > MAX_MEMBERS {
+        return Err(Error::TooManyMembers);
     }
     let env = members.env();
     let mut total_percentage: u32 = 0;

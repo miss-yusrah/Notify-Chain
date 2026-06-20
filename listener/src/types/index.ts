@@ -8,6 +8,20 @@ export interface ContractConfig {
 export interface DiscordConfig {
   webhookUrl: string;
   webhookId: string;
+  deduplicationWindowMs?: number;
+  deduplicationMaxSize?: number;
+}
+
+export interface RetryQueueConfig {
+  baseDelayMs?: number;
+  maxRetries?: number;
+}
+
+export interface RateLimitConfig {
+  enabled: boolean;
+  windowMs: number;
+  maxRequests: number;
+  clientOverrides: Record<string, { maxRequests: number; windowMs?: number }>;
 }
 
 export interface Config {
@@ -20,4 +34,18 @@ export interface Config {
   eventsApiPort: number;
   eventsApiCorsOrigin: string;
   discord?: DiscordConfig;
+  retryQueue?: RetryQueueConfig;
+  scheduler?: SchedulerConfig;
+  databasePath?: string;
+  rateLimit?: RateLimitConfig;
 }
+
+export interface SchedulerConfig {
+  enabled: boolean;
+  pollIntervalMs: number;
+  lockTimeoutMs: number;
+  processorId?: string;
+  batchSize: number;
+  timingBufferMs: number;
+}
+

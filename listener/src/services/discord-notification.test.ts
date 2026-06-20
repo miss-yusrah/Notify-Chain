@@ -1,6 +1,7 @@
 import { xdr } from '@stellar/stellar-sdk';
 import * as StellarSDK from '@stellar/stellar-sdk';
 import { DiscordNotificationService } from './discord-notification';
+import { NotificationDeduplicator } from './notification-deduplicator';
 
 const mockFetch = jest.fn();
 global.fetch = mockFetch;
@@ -90,6 +91,112 @@ describe('DiscordNotificationService', () => {
       const result = await service.sendEventNotification(mockEvent, mockContractConfig);
 
       expect(result).toBe(false);
+    });
+  });
+
+  describe('duplicate detection', () => {
+    it('skips the webhook call for a duplicate event', async () => {
+      mockFetch.mockResolvedValue({ ok: true });
+
+      const service = new DiscordNotificationService(mockConfig);
+      const mockEvent = createMockEvent({ id: 'event-dup' });
+      const mockContractConfig = { address: 'CA123456789ABCDEF', events: ['test'] };
+
+      await service.sendEventNotification(mockEvent, mockContractConfig);
+      const secondResult = await service.sendEventNotification(mockEvent, mockContractConfig);
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(secondResult).toBe(true);
+      expect(service.getDeduplicationMetrics()).toEqual(
+        expect.objectContaining({ skippedDuplicates: 1, cacheSize: 1 })
+      );
+    });
+
+    it('logs a duplicate detection event', async () => {
+      mockFetch.mockResolvedValue({ ok: true });
+
+      const mockLoggerModule = jest.requireMock('../utils/logger').default;
+      const service = new DiscordNotificationService(mockConfig);
+      const mockEvent = createMockEvent({ id: 'event-dup-log' });
+      const mockContractConfig = { address: 'CA123', events: ['test'] };
+
+      await service.sendEventNotification(mockEvent, mockContractConfig);
+      await service.sendEventNotification(mockEvent, mockContractConfig);
+
+      expect(mockLoggerModule.info).toHaveBeenCalledWith(
+        'Skipping duplicate notification',
+        expect.objectContaining({
+          eventId: 'event-dup-log',
+          contractAddress: 'CA123',
+        })
+      );
+    });
+
+
+    it('allows the same notification request after the configured window expires', async () => {
+      mockFetch.mockResolvedValue({ ok: true });
+      let now = 1000;
+      const deduplicator = new NotificationDeduplicator({ windowMs: 500, now: () => now });
+      const service = new DiscordNotificationService(mockConfig, deduplicator);
+      const mockEvent = createMockEvent({ id: 'event-windowed' });
+      const mockContractConfig = { address: 'CA123', events: ['test'] };
+
+      await service.sendEventNotification(mockEvent, mockContractConfig);
+      await service.sendEventNotification(mockEvent, mockContractConfig);
+      now = 1501;
+      const result = await service.sendEventNotification(mockEvent, mockContractConfig);
+
+      expect(result).toBe(true);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(service.getDeduplicationMetrics()).toEqual(
+        expect.objectContaining({ acceptedRequests: 2, skippedDuplicates: 1 })
+      );
+    });
+
+    it('allows the same event id on a different contract through', async () => {
+      mockFetch.mockResolvedValue({ ok: true });
+
+      const service = new DiscordNotificationService(mockConfig);
+      const mockEvent = createMockEvent({ id: 'event-shared-id' });
+      const contractA = { address: 'CONTRACT-A', events: ['test'] };
+      const contractB = { address: 'CONTRACT-B', events: ['test'] };
+
+      await service.sendEventNotification(mockEvent, contractA);
+      const result = await service.sendEventNotification(mockEvent, contractB);
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(result).toBe(true);
+    });
+
+    it('does not mark an event as sent when the webhook call fails', async () => {
+      mockFetch
+        .mockResolvedValueOnce({ ok: false, status: 500, statusText: 'Error', text: () => Promise.resolve('') })
+        .mockResolvedValueOnce({ ok: true });
+
+      const service = new DiscordNotificationService(mockConfig);
+      const mockEvent = createMockEvent({ id: 'event-retry' });
+      const mockContractConfig = { address: 'CA123', events: ['test'] };
+
+      const firstResult = await service.sendEventNotification(mockEvent, mockContractConfig);
+      const secondResult = await service.sendEventNotification(mockEvent, mockContractConfig);
+
+      expect(firstResult).toBe(false);
+      expect(secondResult).toBe(true);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('accepts an injected deduplicator', async () => {
+      mockFetch.mockResolvedValue({ ok: true });
+
+      const deduplicator = new NotificationDeduplicator();
+      const service = new DiscordNotificationService(mockConfig, deduplicator);
+      const mockEvent = createMockEvent({ id: 'event-injected' });
+      const mockContractConfig = { address: 'CA123', events: ['test'] };
+
+      await service.sendEventNotification(mockEvent, mockContractConfig);
+
+      expect(deduplicator.size()).toBe(1);
+      expect(deduplicator.isDuplicate('CA123:event-injected')).toBe(true);
     });
   });
 

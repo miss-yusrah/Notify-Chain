@@ -21,8 +21,15 @@ pub mod mock_token;
 #[contract]
 pub struct AutoShareContract;
 
+const VERSION: u32 = 1;
+
 #[contractimpl]
 impl AutoShareContract {
+    /// Returns the current version of the contract.
+    pub fn version(_env: Env) -> u32 {
+        VERSION
+    }
+
     // ============================================================================
     // Admin Management
     // ============================================================================
@@ -102,8 +109,14 @@ impl AutoShareContract {
     }
 
     /// Adds a member to a group with specified percentage.
-    pub fn add_group_member(env: Env, id: BytesN<32>, address: Address, percentage: u32) {
-        autoshare_logic::add_group_member(env, id, address, percentage).unwrap();
+    pub fn add_group_member(
+        env: Env,
+        id: BytesN<32>,
+        caller: Address,
+        address: Address,
+        percentage: u32,
+    ) {
+        autoshare_logic::add_group_member(env, id, caller, address, percentage).unwrap();
     }
 
     /// Deactivates a group. Only the creator can deactivate.
@@ -230,6 +243,10 @@ impl AutoShareContract {
 }
 
 #[cfg(test)]
+#[path = "tests/test_utils.rs"]
+pub mod test_utils;
+
+#[cfg(test)]
 mod tests {
     #[path = "../tests/autoshare_test.rs"]
     mod autoshare_test;
@@ -240,9 +257,12 @@ mod tests {
     #[path = "../tests/mock_token_test.rs"]
     mod mock_token_test;
 
-    #[path = "../tests/test_utils.rs"]
-    pub mod test_utils;
+    #[path = "../tests/version_test.rs"]
+    mod version_test;
 
     #[path = "../tests/test_utils_test.rs"]
     mod test_utils_test;
+
+    #[path = "../tests/notification_test.rs"]
+    mod notification_test;
 }

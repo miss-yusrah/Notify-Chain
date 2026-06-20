@@ -1,47 +1,74 @@
 import dotenv from 'dotenv';
-import { Config, DiscordConfig } from './types';
 import { startEventsServer } from './api/events-server';
 import { EventSubscriber } from './services/event-subscriber';
+import { NotificationScheduler } from './services/notification-scheduler';
+import { ScheduledNotificationRepository } from './services/scheduled-notification-repository';
+import { NotificationAPI } from './services/notification-api';
+import { initializeDatabase } from './database/database';
+import { DiscordNotificationService } from './services/discord-notification';
 import logger from './utils/logger';
+import { loadConfig, ConfigError } from './config';
 
 dotenv.config();
 
-function loadDiscordConfig(): DiscordConfig | undefined {
-  const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
-  const webhookId = process.env.DISCORD_WEBHOOK_ID;
-  if (!webhookUrl || !webhookId) {
-    return undefined;
-  }
-  return { webhookUrl, webhookId };
-}
-
-function loadConfig(): Config {
-  const discord = loadDiscordConfig();
-  return {
-    stellarNetwork: process.env.STELLAR_NETWORK || 'testnet',
-    stellarRpcUrl: process.env.STELLAR_RPC_URL || 'https://soroban-testnet.stellar.org:443',
-    contractAddresses: JSON.parse(process.env.CONTRACT_ADDRESSES || '[]'),
-    pollIntervalMs: parseInt(process.env.POLL_INTERVAL_MS || '30000'),
-    maxReconnectAttempts: parseInt(process.env.MAX_RECONNECT_ATTEMPTS || '5'),
-    reconnectDelayMs: parseInt(process.env.RECONNECT_DELAY_MS || '5000'),
-    eventsApiPort: parseInt(process.env.EVENTS_API_PORT || '8787'),
-    eventsApiCorsOrigin: process.env.EVENTS_API_CORS_ORIGIN || 'http://localhost:5173',
-    discord,
-  };
-}
-
 async function main() {
   const config = loadConfig();
+
+  // Initialize database if scheduler or rate limiting is enabled
+  let scheduler: NotificationScheduler | null = null;
+  let notificationAPI: NotificationAPI | null = null;
+  const needDb = config.scheduler?.enabled || config.rateLimit?.enabled;
+
+  if (needDb) {
+    try {
+      logger.info('Initializing database');
+      const db = await initializeDatabase(config.databasePath);
+
+      if (config.scheduler?.enabled) {
+        const repository = new ScheduledNotificationRepository(db);
+        notificationAPI = new NotificationAPI(repository);
+
+        // Initialize scheduler with Discord service if available
+        let discordService: DiscordNotificationService | null = null;
+        if (config.discord) {
+          discordService = new DiscordNotificationService(config.discord);
+        }
+
+        scheduler = new NotificationScheduler(repository, config.scheduler, discordService);
+        await scheduler.start();
+
+        logger.info('Notification scheduler started successfully');
+      }
+    } catch (error) {
+      logger.error('Failed to initialize database or scheduler', { error });
+      throw error;
+    }
+  }
+
+  // Start events server and subscriber
   const eventsServer = startEventsServer({
     port: config.eventsApiPort,
     corsOrigin: config.eventsApiCorsOrigin,
+    stellarRpcUrl: config.stellarRpcUrl,
+    discordWebhookUrl: config.discord?.webhookUrl,
+    notificationAPI, // Pass API to events server for scheduling endpoints
+    rateLimit: config.rateLimit,
   });
+
   const subscriber = new EventSubscriber(config);
   await subscriber.start();
 
   const shutdown = async () => {
+    logger.info('Shutting down services...');
+
+    if (scheduler) {
+      await scheduler.stop();
+    }
+
     await subscriber.stop();
     eventsServer.close();
+
+    logger.info('All services stopped successfully');
     process.exit(0);
   };
 
@@ -57,6 +84,10 @@ async function main() {
 }
 
 main().catch((err) => {
-  logger.error('Error starting service', { error: err });
+  if (err instanceof ConfigError) {
+    logger.error('Configuration error', { error: err.message });
+  } else {
+    logger.error('Error starting service', { error: err });
+  }
   process.exit(1);
 });

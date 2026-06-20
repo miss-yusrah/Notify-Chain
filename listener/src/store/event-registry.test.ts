@@ -1,6 +1,20 @@
 import { xdr } from '@stellar/stellar-sdk';
 import { EventRegistry } from './event-registry';
 
+jest.mock('../utils/logger', () => ({
+  __esModule: true,
+  default: {
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+  },
+}));
+
+import logger from '../utils/logger';
+
+const mockedLogger = logger as jest.Mocked<typeof logger>;
+
 describe('EventRegistry', () => {
   it('stores and returns display events from registry input', () => {
     const registry = new EventRegistry(5);
@@ -65,5 +79,10 @@ describe('EventRegistry', () => {
     expect(events).toHaveLength(3);
     expect(events[0].eventId).toBe('evt-2');
     expect(events[2].eventId).toBe('evt-4');
+    expect(mockedLogger.warn).toHaveBeenCalledWith(
+      'Event registry at capacity, evicting oldest events',
+      expect.objectContaining({ maxEvents: 3, evicted: 1 })
+    );
+    expect(mockedLogger.warn).toHaveBeenCalledTimes(2);
   });
 });

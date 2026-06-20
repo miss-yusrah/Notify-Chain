@@ -2,6 +2,7 @@ import * as StellarSDK from '@stellar/stellar-sdk';
 import logger from '../utils/logger';
 import { ContractConfig, DiscordConfig } from '../types';
 import { getEventName } from '../utils/event-utils';
+import { NotificationDeduplicator, generateFingerprint } from './notification-deduplicator';
 
 export interface DiscordMessage {
   content?: string;
@@ -23,46 +24,84 @@ export function createDiscordService(config: DiscordConfig): DiscordNotification
 
 export class DiscordNotificationService {
   private config: DiscordConfig;
+  private deduplicator: NotificationDeduplicator;
 
-  constructor(config: DiscordConfig) {
+  constructor(config: DiscordConfig, deduplicator?: NotificationDeduplicator) {
     this.config = config;
+    this.deduplicator =
+      deduplicator ??
+      new NotificationDeduplicator({
+        windowMs: config.deduplicationWindowMs,
+        maxSize: config.deduplicationMaxSize,
+      });
   }
 
   async sendEventNotification(
     event: StellarSDK.rpc.Api.EventResponse,
-    contractConfig: ContractConfig
+    contractConfig: ContractConfig,
+    requestId?: string
   ): Promise<boolean> {
+    const fingerprint = generateFingerprint(event.id, contractConfig.address);
+
+    if (this.deduplicator.isDuplicate(fingerprint)) {
+      logger.info('Skipping duplicate notification', {
+        eventId: event.id,
+        contractAddress: contractConfig.address,
+        fingerprint,
+        deduplication: this.deduplicator.getMetrics(),
+      });
+      return true;
+    }
+    const logContext = {
+      requestId,
+      eventId: event.id,
+      contractAddress: contractConfig.address,
+      webhookId: this.config.webhookId,
+    };
+
+    logger.info('Sending Discord notification', logContext);
+
     const message = this.formatEventMessage(event, contractConfig);
+    const startTime = Date.now();
 
     try {
       const response = await this.sendWebhook(message);
+      const durationMs = Date.now() - startTime;
 
       if (!response.ok) {
         const errorText = await response.text();
         logger.error('Discord webhook failed', {
+          ...logContext,
           status: response.status,
           statusText: response.statusText,
           error: errorText,
-          webhookId: this.config.webhookId,
+          durationMs,
         });
         return false;
       }
 
-      logger.info('Discord notification sent successfully', {
-        eventId: event.id,
-        contractAddress: contractConfig.address,
+      this.deduplicator.markSent(fingerprint);
+      logger.info('Discord notification delivered', {
+        ...logContext,
+        durationMs,
+        deduplication: this.deduplicator.getMetrics(),
       });
       return true;
     } catch (error) {
       logger.error('Error sending Discord notification', {
+        ...logContext,
         error,
-        contractAddress: contractConfig.address,
+        durationMs: Date.now() - startTime,
       });
       return false;
     }
   }
 
-  async sendTestMessage(): Promise<boolean> {
+  getDeduplicationMetrics() {
+    return this.deduplicator.getMetrics();
+  }
+
+  async sendTestMessage(requestId?: string): Promise<boolean> {
     const message: DiscordMessage = {
       embeds: [
         {
@@ -74,11 +113,31 @@ export class DiscordNotificationService {
       ],
     };
 
+    logger.info('Sending Discord test message', {
+      requestId,
+      webhookId: this.config.webhookId,
+    });
+
+    const startTime = Date.now();
+
     try {
       const response = await this.sendWebhook(message);
+      const durationMs = Date.now() - startTime;
+
+      logger.info('Discord test message delivered', {
+        requestId,
+        webhookId: this.config.webhookId,
+        ok: response.ok,
+        durationMs,
+      });
+
       return response.ok;
     } catch (error) {
-      logger.error('Error sending test message', { error });
+      logger.error('Error sending test message', {
+        requestId,
+        error,
+        durationMs: Date.now() - startTime,
+      });
       return false;
     }
   }
@@ -136,14 +195,12 @@ export class DiscordNotificationService {
       });
     }
 
-    const embed: DiscordEmbed = {
+    return {
       title: `📡 Event: ${eventName}`,
       color: this.getEventColor(event.type),
       timestamp: new Date().toISOString(),
       fields,
     };
-
-    return embed;
   }
 
   private getEventColor(eventType: string): number {
@@ -169,9 +226,10 @@ export class DiscordNotificationService {
           return String(value.u64());
         case StellarSDK.xdr.ScValType.scvI64():
           return String(value.i64());
-        case StellarSDK.xdr.ScValType.scvString():
+        case StellarSDK.xdr.ScValType.scvString(): {
           const strVal = value.str().toString();
           return strVal.length > 500 ? strVal.slice(0, 500) + '...' : strVal;
+        }
         case StellarSDK.xdr.ScValType.scvSymbol():
           return `🔹 ${value.sym().toString()}`;
         case StellarSDK.xdr.ScValType.scvAddress():
@@ -184,3 +242,4 @@ export class DiscordNotificationService {
     }
   }
 }
+

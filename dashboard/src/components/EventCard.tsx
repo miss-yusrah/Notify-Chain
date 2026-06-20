@@ -1,5 +1,6 @@
-import { memo } from 'react';
+import { memo, type KeyboardEvent } from 'react';
 import type { BlockchainEvent } from '../types/event';
+import { formatTimestamp, formatTimestampShort } from '../utils/formatTime';
 
 export type EventCardVariant = 'compact' | 'expanded';
 
@@ -8,18 +9,6 @@ export interface EventCardProps {
   variant?: EventCardVariant;
   isLoading?: boolean;
   onClick?: (event: BlockchainEvent) => void;
-}
-
-function formatTime(timestamp: number): string {
-  return new Date(timestamp).toLocaleString();
-}
-
-function formatTimeShort(timestamp: number): string {
-  return new Date(timestamp).toLocaleTimeString(undefined, {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
 }
 
 function shortenAddress(address: string): string {
@@ -105,18 +94,29 @@ function LoadingCard({ variant }: { variant: EventCardVariant }) {
   );
 }
 
+function handleActivationKey(onClick: (e: BlockchainEvent) => void, event: BlockchainEvent) {
+  return (e: KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onClick(event);
+    }
+  };
+}
+
 function CompactCard({ event, onClick }: { event: BlockchainEvent; onClick?: (e: BlockchainEvent) => void }) {
   const displayName = event.eventName ?? event.type;
   const badgeClass = getEventBadgeClass(event.eventName);
+  const Wrapper = onClick ? 'div' : 'article';
 
   return (
-    <article
+    <Wrapper
       className={`event-card event-card--compact${onClick ? ' event-card--clickable' : ''}`}
       data-event-id={event.eventId}
       onClick={onClick ? () => onClick(event) : undefined}
       role={onClick ? 'button' : undefined}
       tabIndex={onClick ? 0 : undefined}
-      onKeyDown={onClick ? (e) => e.key === 'Enter' && onClick(event) : undefined}
+      aria-label={onClick ? `View details for ${displayName} event` : undefined}
+      onKeyDown={onClick ? handleActivationKey(onClick, event) : undefined}
     >
       <div className="event-card__primary">
         <span className={`event-card__badge ${badgeClass}`}>{displayName}</span>
@@ -126,8 +126,8 @@ function CompactCard({ event, onClick }: { event: BlockchainEvent; onClick?: (e:
         <span className="event-card__address" title={event.contractAddress}>
           {shortenAddress(event.contractAddress)}
         </span>
-        <span className="event-card__time" title={formatTime(event.receivedAt)}>
-          {formatTimeShort(event.receivedAt)}
+        <span className="event-card__time" title={formatTimestamp(event.receivedAt)}>
+          {formatTimestampShort(event.receivedAt)}
         </span>
       </div>
       <div className="event-card__details">
@@ -136,22 +136,24 @@ function CompactCard({ event, onClick }: { event: BlockchainEvent; onClick?: (e:
           <span title={event.txHash}>Tx: {shortenAddress(event.txHash)}</span>
         )}
       </div>
-    </article>
+    </Wrapper>
   );
 }
 
 function ExpandedCard({ event, onClick }: { event: BlockchainEvent; onClick?: (e: BlockchainEvent) => void }) {
   const displayName = event.eventName ?? event.type;
   const badgeClass = getEventBadgeClass(event.eventName);
+  const Wrapper = onClick ? 'div' : 'article';
 
   return (
-    <article
+    <Wrapper
       className={`event-card event-card--expanded${onClick ? ' event-card--clickable' : ''}`}
       data-event-id={event.eventId}
       onClick={onClick ? () => onClick(event) : undefined}
       role={onClick ? 'button' : undefined}
       tabIndex={onClick ? 0 : undefined}
-      onKeyDown={onClick ? (e) => e.key === 'Enter' && onClick(event) : undefined}
+      aria-label={onClick ? `View details for ${displayName} event` : undefined}
+      onKeyDown={onClick ? handleActivationKey(onClick, event) : undefined}
     >
       <div className="event-card__header">
         <h3 className="event-card__title">{displayName}</h3>
@@ -197,7 +199,7 @@ function ExpandedCard({ event, onClick }: { event: BlockchainEvent; onClick?: (e
 
           <div className="event-card__field">
             <dt>Received</dt>
-            <dd>{formatTime(event.receivedAt)}</dd>
+            <dd>{formatTimestamp(event.receivedAt)}</dd>
           </div>
 
           <div className="event-card__field">
@@ -206,7 +208,7 @@ function ExpandedCard({ event, onClick }: { event: BlockchainEvent; onClick?: (e
           </div>
         </dl>
       </div>
-    </article>
+    </Wrapper>
   );
 }
 

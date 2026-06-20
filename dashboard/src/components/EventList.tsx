@@ -59,23 +59,32 @@ export const EventList = memo(function EventList({ events }: EventListProps) {
       ref={onContainerRef}
       className="event-list event-list--virtualized"
       onScroll={onScroll}
+      role="list"
+      aria-label={`Blockchain events, ${events.length.toLocaleString()} total`}
+      tabIndex={0}
     >
       <div
         className="event-list__viewport"
         style={{ height: `${windowState.totalHeight}px` }}
       >
-        {visibleEvents.map((event, index) => (
-          <div
-            key={event.eventId}
-            className="event-list__item"
-            style={{
-              transform: `translateY(${(windowState.startIndex + index) * ROW_HEIGHT}px)`,
-              height: `${ROW_HEIGHT}px`,
-            }}
-          >
-            <EventRow event={event} />
-          </div>
-        ))}
+        {visibleEvents.map((event, index) => {
+          const position = windowState.startIndex + index;
+          return (
+            <div
+              key={event.eventId}
+              className="event-list__item"
+              role="listitem"
+              aria-setsize={events.length}
+              aria-posinset={position + 1}
+              style={{
+                transform: `translateY(${position * ROW_HEIGHT}px)`,
+                height: `${ROW_HEIGHT}px`,
+              }}
+            >
+              <EventRow event={event} />
+            </div>
+          );
+        })}
       </div>
     </div>
   );

@@ -106,6 +106,23 @@ describe('EventSubscriber', () => {
       await jest.advanceTimersByTimeAsync(0);
       await subscriber.stop();
     });
+
+    it('does not start a second poll loop when start is called twice', async () => {
+      jest.useFakeTimers();
+      mockGetEvents.mockResolvedValue({ events: [], cursor: '' });
+
+      const subscriber = new EventSubscriber(testConfig);
+      await subscriber.start();
+      await subscriber.start();
+
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(mockGetEvents).toHaveBeenCalledTimes(1);
+      expect(mockLogger.warn).toHaveBeenCalledWith('Event subscriber already running');
+
+      await subscriber.stop();
+    });
   });
 
   describe('successful event processing', () => {
@@ -511,7 +528,8 @@ describe('EventSubscriber', () => {
 
       expect(mockDiscordService.sendEventNotification).toHaveBeenCalledWith(
         expect.any(Object),
-        expect.any(Object)
+        expect.any(Object),
+        expect.any(String)
       );
     });
 
@@ -540,7 +558,7 @@ describe('EventSubscriber', () => {
       await (subscriber as any).checkForEvents();
 
       expect(mockLogger.warn).toHaveBeenCalledWith(
-        'Failed to send Discord notification, event will still be processed',
+        'Discord notification failed, adding to retry queue',
         expect.objectContaining({ eventId: 'event-1' })
       );
     });
