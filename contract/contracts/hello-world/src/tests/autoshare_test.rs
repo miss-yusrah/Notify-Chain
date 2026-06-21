@@ -1486,10 +1486,10 @@ fn test_create_fails_name_too_long() {
     let creator = test_env.users.get(0).unwrap().clone();
     let token = test_env.mock_tokens.get(0).unwrap().clone();
     let id = BytesN::from_array(&test_env.env, &[1u8; 32]);
-    
+
     // Create a very long name (over 100 characters)
     let long_name = String::from_str(&test_env.env, "a".repeat(101).as_str());
-    
+
     crate::test_utils::mint_tokens(&test_env.env, &token, &creator, 10000000);
     client.create(&id, &long_name, &creator, &10u32, &token);
 }
@@ -1504,7 +1504,7 @@ fn test_create_fails_invalid_usage_count_zero() {
     let token = test_env.mock_tokens.get(0).unwrap().clone();
     let id = BytesN::from_array(&test_env.env, &[1u8; 32]);
     let name = String::from_str(&test_env.env, "Test Group");
-    
+
     crate::test_utils::mint_tokens(&test_env.env, &token, &creator, 10000000);
     client.create(&id, &name, &creator, &0u32, &token);
 }
@@ -1518,14 +1518,14 @@ fn test_create_fails_unsupported_token() {
     let creator = test_env.users.get(0).unwrap().clone();
     let id = BytesN::from_array(&test_env.env, &[1u8; 32]);
     let name = String::from_str(&test_env.env, "Test Group");
-    
+
     // Create an unsupported token (not added to supported tokens)
-    let unsupported_token = test_utils::deploy_mock_token(
-        &test_env.env, 
-        &String::from_str(&test_env.env, "Unsupported"), 
-        &String::from_str(&test_env.env, "UNSUP")
+    let unsupported_token = crate::test_utils::deploy_mock_token(
+        &test_env.env,
+        &String::from_str(&test_env.env, "Unsupported"),
+        &String::from_str(&test_env.env, "UNSUP"),
     );
-    
+
     crate::test_utils::mint_tokens(&test_env.env, &unsupported_token, &creator, 10000000);
     client.create(&id, &name, &creator, &10u32, &unsupported_token);
 }
@@ -1539,10 +1539,17 @@ fn test_topup_fails_invalid_usage_count_zero() {
     let creator = test_env.users.get(0).unwrap().clone();
     let token = test_env.mock_tokens.get(0).unwrap().clone();
     let id = BytesN::from_array(&test_env.env, &[1u8; 32]);
-    
+
     let members = Vec::new(&test_env.env);
-    create_test_group(&test_env.env, &test_env.autoshare_contract, &creator, &members, 10, &token);
-    
+    create_test_group(
+        &test_env.env,
+        &test_env.autoshare_contract,
+        &creator,
+        &members,
+        10,
+        &token,
+    );
+
     client.topup_subscription(&id, &0u32, &token, &creator);
 }
 
@@ -1555,17 +1562,24 @@ fn test_topup_fails_unsupported_token() {
     let creator = test_env.users.get(0).unwrap().clone();
     let supported_token = test_env.mock_tokens.get(0).unwrap().clone();
     let id = BytesN::from_array(&test_env.env, &[1u8; 32]);
-    
+
     let members = Vec::new(&test_env.env);
-    create_test_group(&test_env.env, &test_env.autoshare_contract, &creator, &members, 10, &supported_token);
-    
-    // Create an unsupported token
-    let unsupported_token = test_utils::deploy_mock_token(
-        &test_env.env, 
-        &String::from_str(&test_env.env, "Unsupported"), 
-        &String::from_str(&test_env.env, "UNSUP")
+    create_test_group(
+        &test_env.env,
+        &test_env.autoshare_contract,
+        &creator,
+        &members,
+        10,
+        &supported_token,
     );
-    
+
+    // Create an unsupported token
+    let unsupported_token = crate::test_utils::deploy_mock_token(
+        &test_env.env,
+        &String::from_str(&test_env.env, "Unsupported"),
+        &String::from_str(&test_env.env, "UNSUP"),
+    );
+
     crate::test_utils::mint_tokens(&test_env.env, &unsupported_token, &creator, 10000000);
     client.topup_subscription(&id, &10u32, &unsupported_token, &creator);
 }
@@ -1579,13 +1593,20 @@ fn test_reduce_usage_fails_no_usages_remaining() {
     let creator = test_env.users.get(0).unwrap().clone();
     let token = test_env.mock_tokens.get(0).unwrap().clone();
     let id = BytesN::from_array(&test_env.env, &[1u8; 32]);
-    
+
     let members = Vec::new(&test_env.env);
-    create_test_group(&test_env.env, &test_env.autoshare_contract, &creator, &members, 1, &token);
-    
+    create_test_group(
+        &test_env.env,
+        &test_env.autoshare_contract,
+        &creator,
+        &members,
+        1,
+        &token,
+    );
+
     // Reduce once (should work)
     client.reduce_usage(&id);
-    
+
     // Reduce again (should panic)
     client.reduce_usage(&id);
 }
@@ -1600,7 +1621,7 @@ fn test_set_usage_fee_fails_zero() {
 
     let admin = Address::generate(&env);
     client.initialize_admin(&admin);
-    
+
     client.set_usage_fee(&0u32, &admin);
 }
 
@@ -1614,7 +1635,7 @@ fn test_add_supported_token_fails_already_exists() {
 
     let admin = Address::generate(&env);
     client.initialize_admin(&admin);
-    
+
     let token_id = env.register(MockToken, ());
     let token_client = MockTokenClient::new(&env, &token_id);
     token_client.initialize(
@@ -1623,7 +1644,7 @@ fn test_add_supported_token_fails_already_exists() {
         &String::from_str(&env, "Test Token"),
         &String::from_str(&env, "TST"),
     );
-    
+
     // Add once
     client.add_supported_token(&token_id, &admin);
     // Add again (should panic)
@@ -1640,7 +1661,7 @@ fn test_remove_supported_token_fails_not_found() {
 
     let admin = Address::generate(&env);
     client.initialize_admin(&admin);
-    
+
     let token_id = env.register(MockToken, ());
     let token_client = MockTokenClient::new(&env, &token_id);
     token_client.initialize(
@@ -1649,7 +1670,7 @@ fn test_remove_supported_token_fails_not_found() {
         &String::from_str(&env, "Test Token"),
         &String::from_str(&env, "TST"),
     );
-    
+
     // Try to remove a token that was never added
     client.remove_supported_token(&token_id, &admin);
 }
@@ -1663,11 +1684,18 @@ fn test_update_members_fails_too_many() {
     let creator = test_env.users.get(0).unwrap().clone();
     let token = test_env.mock_tokens.get(0).unwrap().clone();
     let id = BytesN::from_array(&test_env.env, &[1u8; 32]);
-    
+
     // Create group first
     let initial_members = Vec::new(&test_env.env);
-    create_test_group(&test_env.env, &test_env.autoshare_contract, &creator, &initial_members, 10, &token);
-    
+    create_test_group(
+        &test_env.env,
+        &test_env.autoshare_contract,
+        &creator,
+        &initial_members,
+        10,
+        &token,
+    );
+
     // Create 51 members (MAX_MEMBERS is 50)
     let mut too_many_members = Vec::new(&test_env.env);
     for _ in 0..51 {
@@ -1676,7 +1704,7 @@ fn test_update_members_fails_too_many() {
             percentage: 1, // This will sum to 51, but first check is TooManyMembers
         });
     }
-    
+
     client.update_members(&id, &creator, &too_many_members);
 }
 
@@ -1898,7 +1926,7 @@ fn test_too_many_members_rejected() {
 
     // Build > MAX_MEMBERS (51 members, limit is 50)
     let mut members = Vec::new(&test_env.env);
-    for i in 0..51u32 {
+    for _i in 0..51u32 {
         members.push_back(GroupMember {
             address: Address::generate(&test_env.env),
             percentage: 100 / 51,
@@ -1923,7 +1951,7 @@ fn test_members_at_max_succeeds() {
 
     // Exactly MAX_MEMBERS (50 members, each 2%)
     let mut members = Vec::new(&test_env.env);
-    for i in 0..50u32 {
+    for _i in 0..50u32 {
         members.push_back(GroupMember {
             address: Address::generate(&test_env.env),
             percentage: 2,

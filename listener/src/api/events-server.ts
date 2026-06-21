@@ -132,7 +132,7 @@ export function createEventsServer(options: EventsServerOptions): http.Server {
   const corsOrigin = options.corsOrigin ?? 'http://localhost:5173';
   const rateLimiter = options.rateLimit ? new RateLimiter(options.rateLimit) : undefined;
 
-  const server = http.createServer((req, res) => {
+  const server = http.createServer(async (req, res) => {
     const requestId = generateRequestId();
     const correlationId = resolveCorrelationId(req.headers['x-correlation-id']);
     const startTime = Date.now();
@@ -142,6 +142,11 @@ export function createEventsServer(options: EventsServerOptions): http.Server {
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-API-Key, Authorization, X-Correlation-Id');
     res.setHeader('X-Request-Id', requestId);
     res.setHeader('X-Correlation-Id', correlationId);
+
+    if (rateLimiter) {
+      const allowed = await rateLimiter.handle(req, res as any);
+      if (!allowed) return;
+    }
 
     if (req.method === 'OPTIONS') {
       res.writeHead(204);

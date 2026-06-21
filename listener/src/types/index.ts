@@ -10,6 +10,7 @@ export interface DiscordConfig {
   webhookId: string;
   deduplicationWindowMs?: number;
   deduplicationMaxSize?: number;
+  timeoutMs?: number;
 }
 
 export interface RetryQueueConfig {

@@ -25,6 +25,7 @@ export function createDiscordService(config: DiscordConfig): DiscordNotification
 export class DiscordNotificationService {
   private config: DiscordConfig;
   private deduplicator: NotificationDeduplicator;
+  private timeoutCount: number = 0;
 
   constructor(config: DiscordConfig, deduplicator?: NotificationDeduplicator) {
     this.config = config;
@@ -97,6 +98,13 @@ export class DiscordNotificationService {
     }
   }
 
+  getMetrics() {
+    return {
+      ...this.deduplicator.getMetrics(),
+      timeoutCount: this.timeoutCount,
+    };
+  }
+
   getDeduplicationMetrics() {
     return this.deduplicator.getMetrics();
   }
@@ -143,13 +151,32 @@ export class DiscordNotificationService {
   }
 
   private async sendWebhook(message: DiscordMessage): Promise<Response> {
-    return fetch(this.config.webhookUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(message),
-    });
+    const timeoutMs = this.config.timeoutMs ?? 5000;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(this.config.webhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(message),
+        signal: controller.signal as any,
+      });
+      return response;
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        this.timeoutCount++;
+        logger.error('Discord webhook request timed out', {
+          webhookId: this.config.webhookId,
+          timeoutMs,
+        });
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 
   private formatEventMessage(
