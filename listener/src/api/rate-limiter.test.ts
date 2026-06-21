@@ -1,3 +1,4 @@
+import { jest, describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from '@jest/globals';
 import http from 'http';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -30,14 +31,14 @@ const mockResponse = () => {
   let statusCode = 200;
   let body = '';
   return {
-    setHeader: jest.fn().mockImplementation((name, val) => headers.set(name.toLowerCase(), String(val))),
-    writeHead: jest.fn().mockImplementation((code, h) => {
+    setHeader: jest.fn().mockImplementation((name: any, val: any) => headers.set(name.toLowerCase(), String(val))),
+    writeHead: jest.fn().mockImplementation((code: any, h: any) => {
       statusCode = code;
       if (h) {
         Object.entries(h).forEach(([n, v]) => headers.set(n.toLowerCase(), String(v)));
       }
     }),
-    end: jest.fn().mockImplementation((val) => {
+    end: jest.fn().mockImplementation((val: any) => {
       body = val;
     }),
     _getHeaders: () => headers,

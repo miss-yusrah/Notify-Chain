@@ -1,3 +1,4 @@
+import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import http from 'http';
 import crypto from 'crypto';
 import { createEventsServer, checkStellarRpc, checkDiscord } from './events-server';
@@ -12,7 +13,6 @@ jest.mock('@stellar/stellar-sdk', () => ({
     })),
   },
 }));
-import { createEventsServer } from './events-server';
 import { preferenceStore } from '../store/preference-store';
 
 jest.mock('../store/preference-store', () => {
@@ -65,7 +65,7 @@ describe('Preference API endpoints', () => {
 
   beforeEach((done) => {
     jest.clearAllMocks();
-    server = createEventsServer({ port: 0 });
+    server = createEventsServer({ port: 0, stellarRpcUrl: 'http://localhost' });
     server.listen(0, '127.0.0.1', done);
   });
 
@@ -173,6 +173,19 @@ function makePostRequest(
     req.end();
   });
 }
+
+function startServer(options: any): Promise<http.Server> {
+  return new Promise((resolve) => {
+    const s = createEventsServer(options);
+    s.listen(0, '127.0.0.1', () => resolve(s));
+  });
+}
+
+function closeServer(s: http.Server): Promise<void> {
+  return new Promise((resolve) => s.close(() => resolve()));
+}
+
+const BASE_OPTIONS = { port: 0, stellarRpcUrl: 'https://test' };
 
 describe('POST /api/webhooks', () => {
   let server: http.Server;

@@ -1,9 +1,10 @@
+import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 import { xdr } from '@stellar/stellar-sdk';
 import * as StellarSDK from '@stellar/stellar-sdk';
 import { DiscordNotificationService } from './discord-notification';
 import { NotificationDeduplicator } from './notification-deduplicator';
 
-const mockFetch = jest.fn();
+const mockFetch = jest.fn() as any;
 global.fetch = mockFetch;
 
 jest.mock('../utils/logger', () => ({
@@ -92,6 +93,29 @@ describe('DiscordNotificationService', () => {
 
       expect(result).toBe(false);
     });
+
+    it('should handle request timeout', async () => {
+      const abortError = new Error('The operation was aborted');
+      abortError.name = 'AbortError';
+      mockFetch.mockRejectedValueOnce(abortError);
+
+      const mockLoggerModule = (jest.requireMock('../utils/logger') as any).default;
+      const service = new DiscordNotificationService({ ...mockConfig, timeoutMs: 100 });
+      const mockEvent = createMockEvent();
+      const mockContractConfig = { address: 'CA123', events: ['test'] };
+
+      const result = await service.sendEventNotification(mockEvent, mockContractConfig);
+
+      expect(result).toBe(false);
+      expect(mockLoggerModule.error).toHaveBeenCalledWith(
+        'Discord webhook request timed out',
+        expect.objectContaining({
+          webhookId: mockConfig.webhookId,
+          timeoutMs: 100,
+        })
+      );
+      expect(service.getMetrics().timeoutCount).toBe(1);
+    });
   });
 
   describe('duplicate detection', () => {
@@ -115,7 +139,7 @@ describe('DiscordNotificationService', () => {
     it('logs a duplicate detection event', async () => {
       mockFetch.mockResolvedValue({ ok: true });
 
-      const mockLoggerModule = jest.requireMock('../utils/logger').default;
+      const mockLoggerModule = (jest.requireMock('../utils/logger') as any).default;
       const service = new DiscordNotificationService(mockConfig);
       const mockEvent = createMockEvent({ id: 'event-dup-log' });
       const mockContractConfig = { address: 'CA123', events: ['test'] };
