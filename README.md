@@ -62,6 +62,11 @@ run and developed independently.
                                             └────────────────────┘
 ```
 
+> A high-level, contributor-facing architecture guide lives in
+> [`ARCHITECTURE_OVERVIEW.md`](ARCHITECTURE_OVERVIEW.md). It walks new
+> contributors through the on-chain, off-chain, and dashboard layers,
+> the end-to-end data flow, and links out to every subsystem doc.
+>
 > A more detailed, contract-level architecture write-up lives in
 > [`Documents/Task Bounty/ARCHITECTURE.md`](Documents/Task%20Bounty/ARCHITECTURE.md).
 
@@ -174,6 +179,7 @@ Notify-Chain/
 ├── .vscode/
 │   └── settings.json
 ├── README.md                        # This file
+├── ARCHITECTURE_OVERVIEW.md         # High-level architecture guide (issue #137)
 └── .gitignore
 ```
 
