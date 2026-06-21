@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import { useEventStore } from '../store/eventStore';
 import { useEventCount, useEventFilters, useFilterOptions } from '../hooks/useEventSelectors';
+import { SearchAutocomplete } from './SearchAutocomplete';
 
 export const EventFiltersBar = memo(function EventFiltersBar() {
   const filters = useEventFilters();
@@ -14,12 +15,9 @@ export const EventFiltersBar = memo(function EventFiltersBar() {
     <section className="event-filters" aria-label="Event filters">
       <div className="event-filters__group">
         <label htmlFor="event-search">Search</label>
-        <input
-          id="event-search"
-          type="search"
-          placeholder="Search events..."
-          value={filters.search}
-          onChange={(event) => setSearch(event.target.value)}
+        <SearchAutocomplete 
+          value={filters.search} 
+          onChange={(value) => setSearch(value)} 
         />
       </div>
 
