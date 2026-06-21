@@ -14,11 +14,12 @@ The project enables developers to build reactive decentralized applications with
 2. [Project Structure](#project-structure)
 3. [Event Flow](#event-flow)
 4. [Local Development Guide](#local-development-guide)
-5. [Features](#features)
-6. [Use Cases](#use-cases)
-7. [Tech Stack](#tech-stack)
-8. [Contributing](#contributing)
-9. [License](#license)
+5. [Smart Contract Upgrade Guide](#smart-contract-upgrade-guide)
+6. [Features](#features)
+7. [Use Cases](#use-cases)
+8. [Tech Stack](#tech-stack)
+9. [Contributing](#contributing)
+10. [License](#license)
 
 > **Listener service docs**: [Notification Failure Recovery](NOTIFICATION_FAILURE_RECOVERY.md) — retry lifecycle, configuration, and troubleshooting.
 
@@ -395,6 +396,17 @@ Add this to `.vscode/settings.json`:
   "rust-analyzer.checkOnSave.allTargets": false
 }
 ```
+
+---
+
+## Smart Contract Upgrade Guide
+
+Before changing contract storage, public methods, event schemas, authorization
+rules, or deployment artifacts, read the
+[Smart Contract Upgrade Guide](CONTRACT_UPGRADE_GUIDE.md). It documents the
+recommended upgrade workflow, prerequisites, testnet verification steps,
+rollback procedures, risk checklist, and PR template for NotifyChain contract
+changes.
 
 ---
 
