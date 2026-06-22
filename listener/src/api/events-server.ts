@@ -156,7 +156,15 @@ export function createEventsServer(options: EventsServerOptions): http.Server {
     res.setHeader('X-Request-Id', requestId);
     res.setHeader('X-Correlation-Id', correlationId);
 
-    if (rateLimiter) {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+
+    // The rate-limit metrics endpoint is an observability route and must stay
+    // reachable even after a client exhausts its quota — otherwise callers
+    // can't read the very metrics that explain why they are being throttled.
+    const isRateLimitExempt =
+      req.method === 'GET' && url.pathname === '/api/rate-limit/metrics';
+
+    if (rateLimiter && !isRateLimitExempt) {
       const allowed = await rateLimiter.handle(req, res as any);
       if (!allowed) return;
     }
@@ -166,8 +174,6 @@ export function createEventsServer(options: EventsServerOptions): http.Server {
       res.end();
       return;
     }
-
-    const url = new URL(req.url ?? '/', 'http://localhost');
 
     // GET /health
     if (req.method === 'GET' && url.pathname === '/health') {
