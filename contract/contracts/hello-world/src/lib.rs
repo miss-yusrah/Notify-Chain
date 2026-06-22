@@ -240,6 +240,19 @@ impl AutoShareContract {
     pub fn reduce_usage(env: Env, id: BytesN<32>) {
         autoshare_logic::reduce_usage(env, id).unwrap();
     }
+
+    // ============================================================================
+    // Scheduled Notification Management
+    // ============================================================================
+
+    /// Cancels a scheduled notification and emits a ScheduledNotificationCancelled event.
+    ///
+    /// The `notification_id` uniquely identifies the notification being cancelled.
+    /// Callers must authenticate. The contract is paused-aware: cancellations are
+    /// rejected while the contract is paused.
+    pub fn cancel_notification(env: Env, notification_id: BytesN<32>, caller: Address) {
+        autoshare_logic::cancel_notification(env, notification_id, caller).unwrap();
+    }
 }
 
 #[cfg(test)]

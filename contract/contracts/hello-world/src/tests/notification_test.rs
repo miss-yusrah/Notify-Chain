@@ -304,6 +304,176 @@ fn test_events_can_be_filtered_by_category() {
     assert_eq!(skipped, 1); // Admin
 }
 
+// ============================================================================
+// Scheduled notification cancellation event tests
+// ============================================================================
+
+#[test]
+fn test_cancellation_event_is_emitted() {
+    let test_env = setup_test_env();
+    let client = AutoShareContractClient::new(&test_env.env, &test_env.autoshare_contract);
+    let caller = test_env.users.get(0).unwrap().clone();
+
+    let mut id_bytes = [0u8; 32];
+    id_bytes[0] = 1;
+    let notification_id = BytesN::from_array(&test_env.env, &id_bytes);
+
+    client.cancel_notification(&notification_id, &caller);
+
+    assert!(
+        topics_of(&test_env.env, "scheduled_notification_cancelled").is_some(),
+        "expected scheduled_notification_cancelled event to be emitted"
+    );
+}
+
+#[test]
+fn test_cancellation_event_has_notification_category() {
+    let test_env = setup_test_env();
+    let client = AutoShareContractClient::new(&test_env.env, &test_env.autoshare_contract);
+    let caller = test_env.users.get(0).unwrap().clone();
+
+    let mut id_bytes = [0u8; 32];
+    id_bytes[0] = 2;
+    let notification_id = BytesN::from_array(&test_env.env, &id_bytes);
+
+    client.cancel_notification(&notification_id, &caller);
+
+    assert_eq!(
+        category_of(&test_env.env, "scheduled_notification_cancelled"),
+        Some(NotificationCategory::Notification)
+    );
+}
+
+#[test]
+fn test_cancellation_event_data_contains_notification_id() {
+    let test_env = setup_test_env();
+    let client = AutoShareContractClient::new(&test_env.env, &test_env.autoshare_contract);
+    let caller = test_env.users.get(0).unwrap().clone();
+
+    let mut id_bytes = [0u8; 32];
+    id_bytes[0] = 3;
+    let notification_id = BytesN::from_array(&test_env.env, &id_bytes);
+
+    client.cancel_notification(&notification_id, &caller);
+
+    let emitted_id = test_env
+        .env
+        .events()
+        .all()
+        .iter()
+        .find_map(|(_addr, topics, data)| {
+            let first = topics.get(0)?;
+            let n = Symbol::try_from_val(&test_env.env, &first).ok()?;
+            if n == Symbol::new(&test_env.env, "scheduled_notification_cancelled") {
+                Some(data)
+            } else {
+                None
+            }
+        })
+        .expect("scheduled_notification_cancelled event must be emitted");
+
+    let data_id = BytesN::<32>::try_from_val(&test_env.env, &emitted_id).unwrap();
+    assert_eq!(data_id, notification_id);
+}
+
+#[test]
+fn test_cancellation_event_topic_shape() {
+    let test_env = setup_test_env();
+    let client = AutoShareContractClient::new(&test_env.env, &test_env.autoshare_contract);
+    let caller = test_env.users.get(0).unwrap().clone();
+
+    let mut id_bytes = [0u8; 32];
+    id_bytes[0] = 4;
+    let notification_id = BytesN::from_array(&test_env.env, &id_bytes);
+
+    client.cancel_notification(&notification_id, &caller);
+
+    let topics = topics_of(&test_env.env, "scheduled_notification_cancelled")
+        .expect("event must be emitted");
+
+    // Topics: [0] event name, [1] caller address, [2] category
+    assert_eq!(topics.len(), 3);
+
+    let name = Symbol::try_from_val(&test_env.env, &topics.get(0).unwrap()).unwrap();
+    assert_eq!(
+        name,
+        Symbol::new(&test_env.env, "scheduled_notification_cancelled")
+    );
+
+    let topic_caller = Address::try_from_val(&test_env.env, &topics.get(1).unwrap()).unwrap();
+    assert_eq!(topic_caller, caller);
+
+    let category =
+        NotificationCategory::try_from_val(&test_env.env, &topics.get(2).unwrap()).unwrap();
+    assert_eq!(category, NotificationCategory::Notification);
+}
+
+#[test]
+fn test_cancellation_blocked_when_contract_paused() {
+    let test_env = setup_test_env();
+    let client = AutoShareContractClient::new(&test_env.env, &test_env.autoshare_contract);
+    let caller = test_env.users.get(0).unwrap().clone();
+
+    client.pause(&test_env.admin);
+
+    let mut id_bytes = [0u8; 32];
+    id_bytes[0] = 5;
+    let notification_id = BytesN::from_array(&test_env.env, &id_bytes);
+
+    let result = client.try_cancel_notification(&notification_id, &caller);
+    assert!(result.is_err(), "cancellation should be rejected while contract is paused");
+}
+
+/// Verifies that each call to `cancel_notification` emits a
+/// `scheduled_notification_cancelled` event carrying the correct notification
+/// identifier. The assertion runs immediately after each call so the latest
+/// emitted event is always the one we just triggered.
+#[test]
+fn test_multiple_cancellations_emit_distinct_events() {
+    let test_env = setup_test_env();
+    let client = AutoShareContractClient::new(&test_env.env, &test_env.autoshare_contract);
+    let caller = test_env.users.get(0).unwrap().clone();
+
+    let make_id = |n: u8| {
+        let mut bytes = [0u8; 32];
+        bytes[0] = n;
+        BytesN::from_array(&test_env.env, &bytes)
+    };
+
+    for n in [10u8, 20, 30] {
+        let expected_id = make_id(n);
+        client.cancel_notification(&expected_id, &caller);
+
+        // Immediately after the call, verify the latest event carries the
+        // notification id that was just cancelled.
+        let emitted_data = test_env
+            .env
+            .events()
+            .all()
+            .iter()
+            .find_map(|(_addr, topics, data)| {
+                if topics.is_empty() {
+                    return None;
+                }
+                let first = topics.get(0)?;
+                let name = Symbol::try_from_val(&test_env.env, &first).ok()?;
+                if name == Symbol::new(&test_env.env, "scheduled_notification_cancelled") {
+                    Some(data)
+                } else {
+                    None
+                }
+            })
+            .expect("scheduled_notification_cancelled must be emitted");
+
+        let data_id = BytesN::<32>::try_from_val(&test_env.env, &emitted_data)
+            .expect("event data must be BytesN<32>");
+        assert_eq!(
+            data_id, expected_id,
+            "event data must carry the notification id that was cancelled (n = {n})"
+        );
+    }
+}
+
 /// Backward compatibility: the event name is still the first topic, the
 /// pre-existing `creator` topic is unchanged, the category is appended as the
 /// trailing topic, and the data payload (`id`) is preserved.

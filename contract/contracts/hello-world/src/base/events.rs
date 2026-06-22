@@ -23,6 +23,8 @@ pub enum NotificationCategory {
     Admin = 1,
     /// Movement of funds: withdrawals.
     Financial = 2,
+    /// Scheduled notification operations: cancellation.
+    Notification = 3,
 }
 
 /// Severity level attached to every emitted event alongside its category.
@@ -164,4 +166,19 @@ pub struct AuthorizationFailure {
     #[topic]
     pub priority: NotificationPriority,
     pub action: String,
+}
+
+/// Emitted when a scheduled notification is cancelled.
+///
+/// The `notification_id` field carries the unique identifier of the notification
+/// that was cancelled, allowing off-chain consumers to correlate the on-chain
+/// event back to the corresponding scheduled notification record.
+#[contractevent(data_format = "single-value")]
+#[derive(Clone)]
+pub struct ScheduledNotificationCancelled {
+    #[topic]
+    pub caller: Address,
+    #[topic]
+    pub category: NotificationCategory,
+    pub notification_id: BytesN<32>,
 }
