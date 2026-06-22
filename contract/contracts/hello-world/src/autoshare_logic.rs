@@ -987,6 +987,7 @@ pub fn cancel_notification(
     ScheduledNotificationCancelled {
         caller,
         category: NotificationCategory::Notification,
+        priority: NotificationPriority::Low,
         notification_id,
     }
     .publish(&env);

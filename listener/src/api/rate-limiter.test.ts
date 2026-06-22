@@ -239,6 +239,138 @@ describe('RateLimiter', () => {
     });
   });
 
+  describe('Metrics Tracking', () => {
+    it('tracks allowed and blocked requests accurately', async () => {
+      const limiter = new RateLimiter({
+        enabled: true,
+        windowMs: 60000,
+        maxRequests: 2,
+        clientOverrides: {},
+      });
+
+      const req = mockRequest({}, '127.0.0.1');
+      
+      // Initial metrics
+      let metrics = limiter.getMetrics();
+      expect(metrics.totalRequests).toBe(0);
+      expect(metrics.allowedRequests).toBe(0);
+      expect(metrics.blockedRequests).toBe(0);
+
+      // Request 1: Allowed
+      await limiter.handle(req, mockResponse());
+      metrics = limiter.getMetrics();
+      expect(metrics.totalRequests).toBe(1);
+      expect(metrics.allowedRequests).toBe(1);
+      expect(metrics.blockedRequests).toBe(0);
+
+      // Request 2: Allowed
+      await limiter.handle(req, mockResponse());
+      metrics = limiter.getMetrics();
+      expect(metrics.totalRequests).toBe(2);
+      expect(metrics.allowedRequests).toBe(2);
+      expect(metrics.blockedRequests).toBe(0);
+
+      // Request 3: Blocked
+      await limiter.handle(req, mockResponse());
+      metrics = limiter.getMetrics();
+      expect(metrics.totalRequests).toBe(3);
+      expect(metrics.allowedRequests).toBe(2);
+      expect(metrics.blockedRequests).toBe(1);
+
+      limiter.destroy();
+    });
+
+    it('tracks top blocked clients', async () => {
+      const limiter = new RateLimiter({
+        enabled: true,
+        windowMs: 60000,
+        maxRequests: 1,
+        clientOverrides: {},
+      });
+
+      // Client A: 3 blocks
+      const reqA = mockRequest({ 'x-api-key': 'client-a' });
+      await limiter.handle(reqA, mockResponse());
+      await limiter.handle(reqA, mockResponse());
+      await limiter.handle(reqA, mockResponse());
+      await limiter.handle(reqA, mockResponse());
+
+      // Client B: 1 block
+      const reqB = mockRequest({ 'x-api-key': 'client-b' });
+      await limiter.handle(reqB, mockResponse());
+      await limiter.handle(reqB, mockResponse());
+
+      const metrics = limiter.getMetrics();
+      expect(metrics.topBlockedClients.length).toBe(2);
+      expect(metrics.topBlockedClients[0].blockCount).toBe(3);
+      expect(metrics.topBlockedClients[1].blockCount).toBe(1);
+
+      limiter.destroy();
+    });
+
+    it('resets metrics when requested', async () => {
+      const limiter = new RateLimiter({
+        enabled: true,
+        windowMs: 60000,
+        maxRequests: 1,
+        clientOverrides: {},
+      });
+
+      const req = mockRequest({}, '127.0.0.1');
+      await limiter.handle(req, mockResponse());
+      await limiter.handle(req, mockResponse());
+
+      let metrics = limiter.getMetrics();
+      expect(metrics.totalRequests).toBe(2);
+
+      limiter.resetMetrics();
+
+      metrics = limiter.getMetrics();
+      expect(metrics.totalRequests).toBe(0);
+      expect(metrics.allowedRequests).toBe(0);
+      expect(metrics.blockedRequests).toBe(0);
+
+      limiter.destroy();
+    });
+
+    it('masks API keys in top blocked clients', async () => {
+      const limiter = new RateLimiter({
+        enabled: true,
+        windowMs: 60000,
+        maxRequests: 1,
+        clientOverrides: {},
+      });
+
+      const req = mockRequest({ 'x-api-key': 'sk_live_very_long_secret_key_12345' });
+      await limiter.handle(req, mockResponse());
+      await limiter.handle(req, mockResponse());
+
+      const metrics = limiter.getMetrics();
+      expect(metrics.topBlockedClients[0].clientId).toBe('sk_live_...');
+      expect(metrics.topBlockedClients[0].clientId).not.toContain('secret');
+
+      limiter.destroy();
+    });
+
+    it('does not mask IP addresses in top blocked clients', async () => {
+      const limiter = new RateLimiter({
+        enabled: true,
+        windowMs: 60000,
+        maxRequests: 1,
+        clientOverrides: {},
+      });
+
+      const req = mockRequest({}, '192.168.1.100');
+      await limiter.handle(req, mockResponse());
+      await limiter.handle(req, mockResponse());
+
+      const metrics = limiter.getMetrics();
+      expect(metrics.topBlockedClients[0].clientId).toBe('192.168.1.100');
+
+      limiter.destroy();
+    });
+  });
+
   describe('Event Recording', () => {
     it('records rate limit violations to SQLite database and logs warning', async () => {
       const limiter = new RateLimiter({
@@ -339,5 +471,55 @@ describe('Events Server Rate Limiting Integration', () => {
     expect(res3.headers['x-ratelimit-limit']).toBe('2');
     expect(res3.headers['x-ratelimit-remaining']).toBe('0');
     expect(res3.headers['retry-after']).toBeDefined();
+  });
+
+  it('provides rate limiting metrics via GET /api/rate-limit/metrics', async () => {
+    server = createEventsServer({
+      port,
+      stellarRpcUrl: 'https://soroban-testnet.stellar.org:443',
+      rateLimit: {
+        enabled: true,
+        windowMs: 60000,
+        maxRequests: 2,
+        clientOverrides: {},
+      },
+    });
+
+    await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', () => resolve()));
+
+    // Make requests to generate metrics
+    await makeRequest('/api/events');
+    await makeRequest('/api/events');
+    await makeRequest('/api/events'); // This one should be blocked
+
+    // Fetch metrics
+    const metricsResponse = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const req = http.request(
+        {
+          host: '127.0.0.1',
+          port,
+          path: '/api/rate-limit/metrics',
+          method: 'GET',
+        },
+        (res) => {
+          let body = '';
+          res.on('data', (chunk) => { body += chunk; });
+          res.on('end', () => {
+            resolve({ status: res.statusCode!, body });
+          });
+        }
+      );
+      req.on('error', reject);
+      req.end();
+    });
+
+    expect(metricsResponse.status).toBe(200);
+    const metrics = JSON.parse(metricsResponse.body);
+    
+    expect(metrics.totalRequests).toBeGreaterThanOrEqual(3);
+    expect(metrics.allowedRequests).toBeGreaterThanOrEqual(2);
+    expect(metrics.blockedRequests).toBeGreaterThanOrEqual(1);
+    expect(metrics.uniqueClients).toBeGreaterThanOrEqual(1);
+    expect(metrics.startTime).toBeDefined();
   });
 });

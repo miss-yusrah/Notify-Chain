@@ -4,7 +4,7 @@ use soroban_sdk::{contractevent, contracttype, Address, BytesN, String};
 ///
 /// Off-chain consumers (listeners, indexers, dashboards) often only care about a
 /// subset of the events the contract emits. Each event carries its category as a
-/// trailing, indexed event topic so consumers can subscribe to — or filter out —
+/// trailing, indexed event topic so consumers can subscribe to  or filter out
 /// whole categories without having to decode the event payload first.
 ///
 /// # Backward compatibility
@@ -31,8 +31,8 @@ pub enum NotificationCategory {
 ///
 /// Off-chain consumers (alerting, dashboards, paging) often route notifications
 /// by priority rather than (or in addition to) category. Each event carries its
-/// priority as a trailing, indexed event topic so consumers can subscribe to —
-/// or page on — high-priority notifications without decoding the payload.
+/// priority as a trailing, indexed event topic so consumers can subscribe to
+/// or page on  high-priority notifications without decoding the payload.
 ///
 /// # Backward compatibility
 ///
@@ -180,6 +180,8 @@ pub struct ScheduledNotificationCancelled {
     pub caller: Address,
     #[topic]
     pub category: NotificationCategory,
+    #[topic]
+    pub priority: NotificationPriority,
     pub notification_id: BytesN<32>,
 }
 

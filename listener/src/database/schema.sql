@@ -38,6 +38,9 @@ CREATE TABLE IF NOT EXISTS scheduled_notifications (
 );
 
 -- Indexes for performance optimization
+CREATE INDEX IF NOT EXISTS idx_scheduled_notifications_status 
+  ON scheduled_notifications(status);
+
 CREATE INDEX IF NOT EXISTS idx_scheduled_notifications_status_execute_at 
   ON scheduled_notifications(status, execute_at) 
   WHERE status = 'PENDING';
@@ -75,6 +78,9 @@ CREATE INDEX IF NOT EXISTS idx_execution_log_notification_id
 
 CREATE INDEX IF NOT EXISTS idx_execution_log_execution_time 
   ON notification_execution_log(execution_time);
+
+CREATE INDEX IF NOT EXISTS idx_execution_log_status_execution_time 
+  ON notification_execution_log(status, execution_time);
 
 -- Trigger to update updated_at timestamp
 CREATE TRIGGER IF NOT EXISTS update_scheduled_notifications_timestamp 

@@ -6,9 +6,8 @@ import { PreferencesUpdateInput } from '../types/preferences';
 import { NotificationAPI } from '../services/notification-api';
 import { NotificationType } from '../types/scheduled-notification';
 import logger from '../utils/logger';
-import { generateRequestId } from '../utils/request-id';
-import { NotificationHistoryService } from '../services/notification-history';
 import { generateRequestId, resolveCorrelationId } from '../utils/request-id';
+import { NotificationHistoryService } from '../services/notification-history';
 import {
   verifySignature,
   extractSignature,
@@ -204,6 +203,36 @@ export function createEventsServer(options: EventsServerOptions): http.Server {
         returned: events.length,
         durationMs: Date.now() - startTime,
       });
+      return;
+    }
+
+    // GET /api/rate-limit/metrics
+    if (req.method === 'GET' && url.pathname === '/api/rate-limit/metrics') {
+      if (!rateLimiter) {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Rate limiting not enabled' }));
+        return;
+      }
+
+      const metrics = rateLimiter.getMetrics();
+      const reset = url.searchParams.get('reset') === 'true';
+
+      logger.info('Handling GET /api/rate-limit/metrics', {
+        requestId,
+        correlationId,
+        totalRequests: metrics.totalRequests,
+        blockedRequests: metrics.blockedRequests,
+        reset,
+        durationMs: Date.now() - startTime,
+      });
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(metrics));
+
+      if (reset) {
+        rateLimiter.resetMetrics();
+        logger.info('Rate limit metrics reset after read', { requestId, correlationId });
+      }
       return;
     }
 
@@ -411,6 +440,7 @@ export function createEventsServer(options: EventsServerOptions): http.Server {
 
       logger.info('Handling GET /api/notifications/history', {
         requestId,
+        correlationId,
         limit,
         offset,
         status,
@@ -431,13 +461,12 @@ export function createEventsServer(options: EventsServerOptions): http.Server {
 
           logger.info('GET /api/notifications/history complete', {
             requestId,
-            returned: result.records.length,
             total: result.total,
             durationMs: Date.now() - startTime,
           });
         })
         .catch((error) => {
-          logger.error('Failed to retrieve notification history', { error, requestId });
+          logger.error('Failed to retrieve notification history', { error, requestId, correlationId });
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: (error as Error).message }));
         });
@@ -453,37 +482,39 @@ export function createEventsServer(options: EventsServerOptions): http.Server {
     const getPrefsMatch = url.pathname.match(/^\/api\/preferences\/([^/]+)$/);
     if (req.method === 'GET' && getPrefsMatch) {
       const userId = decodeURIComponent(getPrefsMatch[1]);
+      logger.info('Handling GET /api/preferences/:userId', { requestId, correlationId, userId });
       const prefs = preferenceStore.get(userId);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(prefs));
-      return;
     }
 
     // PUT /api/preferences/:userId
     const putPrefsMatch = url.pathname.match(/^\/api\/preferences\/([^/]+)$/);
     if (req.method === 'PUT' && putPrefsMatch) {
       const userId = decodeURIComponent(putPrefsMatch[1]);
+      logger.info('Handling PUT /api/preferences/:userId', { requestId, correlationId, userId });
       let body = '';
       req.on('data', (chunk) => { body += chunk; });
       req.on('end', () => {
         try {
           const input: PreferencesUpdateInput = JSON.parse(body);
           if (!input || typeof input.categories !== 'object') {
+            logger.warn('PUT /api/preferences/:userId invalid body', { requestId, correlationId, userId });
             res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Invalid body: expected { categories: { [key]: boolean } }' }));
             return;
           }
           const updated = preferenceStore.update(userId, input);
+          logger.info('PUT /api/preferences/:userId complete', { requestId, correlationId, userId, durationMs: Date.now() - startTime });
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(updated));
         } catch {
+          logger.error('PUT /api/preferences/:userId invalid JSON', { requestId, correlationId, userId });
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Invalid JSON' }));
         }
       });
       return;
     }
-
     logger.warn('Unhandled request', { requestId, correlationId, method: req.method, url: req.url });
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Not found' }));
