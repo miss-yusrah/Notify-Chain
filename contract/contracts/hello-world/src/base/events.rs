@@ -1,20 +1,10 @@
 use soroban_sdk::{contractevent, contracttype, Address, BytesN, String};
 
-/// Priority metadata attached to notifications emitted by the contract.
-#[contracttype]
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum NotificationPriority {
-    Low = 0,
-    Standard = 1,
-    High = 2,
-    Critical = 3,
-}
-
 /// High-level notification category attached to every emitted event.
 ///
 /// Off-chain consumers (listeners, indexers, dashboards) often only care about a
 /// subset of the events the contract emits. Each event carries its category as a
-/// trailing, indexed event topic so consumers can subscribe to — or filter out —
+/// trailing, indexed event topic so consumers can subscribe to  or filter out 
 /// whole categories without having to decode the event payload first.
 ///
 /// # Backward compatibility
@@ -41,8 +31,8 @@ pub enum NotificationCategory {
 ///
 /// Off-chain consumers (alerting, dashboards, paging) often route notifications
 /// by priority rather than (or in addition to) category. Each event carries its
-/// priority as a trailing, indexed event topic so consumers can subscribe to —
-/// or page on — high-priority notifications without decoding the payload.
+/// priority as a trailing, indexed event topic so consumers can subscribe to 
+/// or page on  high-priority notifications without decoding the payload.
 ///
 /// # Backward compatibility
 ///
@@ -72,8 +62,6 @@ pub struct AutoshareCreated {
     #[topic]
     pub creator: Address,
     #[topic]
-    pub priority: NotificationPriority,
-    #[topic]
     pub category: NotificationCategory,
     #[topic]
     pub priority: NotificationPriority,
@@ -85,8 +73,6 @@ pub struct AutoshareCreated {
 #[derive(Clone)]
 pub struct ContractPaused {
     #[topic]
-    pub priority: NotificationPriority,
-    #[topic]
     pub category: NotificationCategory,
     #[topic]
     pub priority: NotificationPriority,
@@ -96,8 +82,6 @@ pub struct ContractPaused {
 #[contractevent]
 #[derive(Clone)]
 pub struct ContractUnpaused {
-    #[topic]
-    pub priority: NotificationPriority,
     #[topic]
     pub category: NotificationCategory,
     #[topic]
@@ -110,8 +94,6 @@ pub struct ContractUnpaused {
 pub struct AutoshareUpdated {
     #[topic]
     pub updater: Address,
-    #[topic]
-    pub priority: NotificationPriority,
     #[topic]
     pub category: NotificationCategory,
     #[topic]
@@ -126,8 +108,6 @@ pub struct GroupDeactivated {
     #[topic]
     pub creator: Address,
     #[topic]
-    pub priority: NotificationPriority,
-    #[topic]
     pub category: NotificationCategory,
     #[topic]
     pub priority: NotificationPriority,
@@ -141,8 +121,6 @@ pub struct GroupActivated {
     #[topic]
     pub creator: Address,
     #[topic]
-    pub priority: NotificationPriority,
-    #[topic]
     pub category: NotificationCategory,
     #[topic]
     pub priority: NotificationPriority,
@@ -155,8 +133,6 @@ pub struct GroupActivated {
 pub struct AdminTransferred {
     #[topic]
     pub old_admin: Address,
-    #[topic]
-    pub priority: NotificationPriority,
     #[topic]
     pub category: NotificationCategory,
     #[topic]
@@ -173,8 +149,6 @@ pub struct Withdrawal {
     #[topic]
     pub recipient: Address,
     #[topic]
-    pub priority: NotificationPriority,
-    #[topic]
     pub category: NotificationCategory,
     #[topic]
     pub priority: NotificationPriority,
@@ -187,8 +161,6 @@ pub struct Withdrawal {
 pub struct AuthorizationFailure {
     #[topic]
     pub caller: Address,
-    #[topic]
-    pub priority: NotificationPriority,
     #[topic]
     pub category: NotificationCategory,
     #[topic]
@@ -208,5 +180,7 @@ pub struct ScheduledNotificationCancelled {
     pub caller: Address,
     #[topic]
     pub category: NotificationCategory,
+    #[topic]
+    pub priority: NotificationPriority,
     pub notification_id: BytesN<32>,
 }

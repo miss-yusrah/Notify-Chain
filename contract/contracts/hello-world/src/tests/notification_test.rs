@@ -63,16 +63,6 @@ fn priority_of(env: &soroban_sdk::Env, event_name: &str) -> Option<NotificationP
     NotificationPriority::try_from_val(env, &last).ok()
 }
 
-/// Extracts priority metadata for the latest event named `event_name`.
-fn priority_of(env: &soroban_sdk::Env, event_name: &str) -> Option<NotificationPriority> {
-    let topics = topics_of(env, event_name)?;
-    if topics.len() < 2 {
-        return None;
-    }
-    let priority = topics.get(topics.len() - 2)?;
-    NotificationPriority::try_from_val(env, &priority).ok()
-}
-
 /// Returns the category of the most recently emitted event — i.e. the metadata a
 /// streaming consumer would read off the event as it arrives.
 ///
@@ -90,11 +80,8 @@ fn latest_category(env: &soroban_sdk::Env) -> Option<NotificationCategory> {
 
 fn latest_priority(env: &soroban_sdk::Env) -> Option<NotificationPriority> {
     let (_addr, topics, _data) = env.events().all().last()?;
-    if topics.len() < 2 {
-        return None;
-    }
-    let priority = topics.get(topics.len() - 2)?;
-    NotificationPriority::try_from_val(env, &priority).ok()
+    let last = topics.last()?;
+    NotificationPriority::try_from_val(env, &last).ok()
 }
 
 #[test]
@@ -118,7 +105,7 @@ fn test_created_event_has_group_category() {
     );
     assert_eq!(
         priority_of(&test_env.env, "autoshare_created"),
-        Some(NotificationPriority::Standard)
+        Some(NotificationPriority::Medium)
     );
 }
 
@@ -139,9 +126,7 @@ fn test_created_group_stores_standard_priority() {
     );
 
     let details = client.get(&id);
-    assert_eq!(details.priority, NotificationPriority::Standard);
-        Some(NotificationPriority::Medium)
-    );
+    assert_eq!(details.priority, NotificationPriority::Medium);
 }
 
 #[test]
@@ -173,7 +158,6 @@ fn test_updated_event_has_group_category() {
     );
     assert_eq!(
         priority_of(&test_env.env, "autoshare_updated"),
-        Some(NotificationPriority::Standard)
         Some(NotificationPriority::Medium)
     );
 }
@@ -201,7 +185,6 @@ fn test_deactivate_and_activate_events_have_group_category() {
     );
     assert_eq!(
         priority_of(&test_env.env, "group_deactivated"),
-        Some(NotificationPriority::Standard)
         Some(NotificationPriority::Low)
     );
 
@@ -212,7 +195,6 @@ fn test_deactivate_and_activate_events_have_group_category() {
     );
     assert_eq!(
         priority_of(&test_env.env, "group_activated"),
-        Some(NotificationPriority::Standard)
         Some(NotificationPriority::Low)
     );
 }
@@ -256,7 +238,6 @@ fn test_admin_transfer_event_has_admin_category() {
     );
     assert_eq!(
         priority_of(&test_env.env, "admin_transferred"),
-        Some(NotificationPriority::High)
         Some(NotificationPriority::Critical)
     );
 }
@@ -286,7 +267,6 @@ fn test_withdrawal_event_has_financial_category() {
     );
     assert_eq!(
         priority_of(&test_env.env, "withdrawal"),
-        Some(NotificationPriority::Critical)
         Some(NotificationPriority::High)
     );
 }
@@ -333,7 +313,7 @@ fn test_events_can_be_filtered_by_category() {
     );
     assert_eq!(
         latest_priority(&test_env.env),
-        Some(NotificationPriority::Standard)
+        Some(NotificationPriority::Medium)
     );
     route();
 
@@ -359,7 +339,7 @@ fn test_events_can_be_filtered_by_category() {
     );
     assert_eq!(
         latest_priority(&test_env.env),
-        Some(NotificationPriority::Critical)
+        Some(NotificationPriority::High)
     );
     route();
 
@@ -454,8 +434,8 @@ fn test_cancellation_event_topic_shape() {
     let topics = topics_of(&test_env.env, "scheduled_notification_cancelled")
         .expect("event must be emitted");
 
-    // Topics: [0] event name, [1] caller address, [2] category
-    assert_eq!(topics.len(), 3);
+    // Topics: [0] event name, [1] caller address, [2] category, [3] priority
+    assert_eq!(topics.len(), 4);
 
     let name = Symbol::try_from_val(&test_env.env, &topics.get(0).unwrap()).unwrap();
     assert_eq!(
@@ -469,6 +449,10 @@ fn test_cancellation_event_topic_shape() {
     let category =
         NotificationCategory::try_from_val(&test_env.env, &topics.get(2).unwrap()).unwrap();
     assert_eq!(category, NotificationCategory::Notification);
+
+    let priority =
+        NotificationPriority::try_from_val(&test_env.env, &topics.get(3).unwrap()).unwrap();
+    assert_eq!(priority, NotificationPriority::Low);
 }
 
 #[test]
@@ -484,7 +468,10 @@ fn test_cancellation_blocked_when_contract_paused() {
     let notification_id = BytesN::from_array(&test_env.env, &id_bytes);
 
     let result = client.try_cancel_notification(&notification_id, &caller);
-    assert!(result.is_err(), "cancellation should be rejected while contract is paused");
+    assert!(
+        result.is_err(),
+        "cancellation should be rejected while contract is paused"
+    );
 }
 
 /// Verifies that each call to `cancel_notification` emits a
@@ -556,9 +543,6 @@ fn test_created_event_backward_compatible_shape() {
     );
 
     let topics = topics_of(&test_env.env, "autoshare_created").expect("event emitted");
-    // [0] event name, [1] creator (unchanged), [2] priority, [3] category.
-    // [0] event name, [1] creator (unchanged), [2] category (now second-to-last),
-    // [3] priority (new trailing topic).
     assert_eq!(topics.len(), 4);
 
     let name = Symbol::try_from_val(&test_env.env, &topics.get(0).unwrap()).unwrap();
@@ -567,20 +551,14 @@ fn test_created_event_backward_compatible_shape() {
     let topic_creator = Address::try_from_val(&test_env.env, &topics.get(1).unwrap()).unwrap();
     assert_eq!(topic_creator, creator);
 
-    let priority =
-        NotificationPriority::try_from_val(&test_env.env, &topics.get(2).unwrap()).unwrap();
-    assert_eq!(priority, NotificationPriority::Standard);
-
     let category =
-        NotificationCategory::try_from_val(&test_env.env, &topics.get(3).unwrap()).unwrap();
+        NotificationCategory::try_from_val(&test_env.env, &topics.get(2).unwrap()).unwrap();
     assert_eq!(category, NotificationCategory::Group);
 
-    // The newly added trailing topic is the priority.
     let priority =
         NotificationPriority::try_from_val(&test_env.env, &topics.get(3).unwrap()).unwrap();
     assert_eq!(priority, NotificationPriority::Medium);
 
-    // Data payload is still the group id.
     let data = test_env
         .env
         .events()
