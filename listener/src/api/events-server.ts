@@ -16,6 +16,11 @@ import {
 } from '../services/webhook-verifier';
 import { WebhookSecret, RateLimitConfig } from '../types';
 import { RateLimiter } from './rate-limiter';
+import {
+  getNotificationAnalyticsAggregator,
+  setNotificationAnalyticsAggregator,
+  NotificationAnalyticsAggregator,
+} from '../services/notification-analytics-aggregator';
 
 export interface EventsServerOptions {
   port: number;
@@ -25,6 +30,12 @@ export interface EventsServerOptions {
   webhookSecrets?: WebhookSecret[];
   notificationAPI?: NotificationAPI | null;
   rateLimit?: RateLimitConfig;
+  /**
+   * Optional override for the analytics aggregator. Tests use this to inject
+   * a controlled instance and reset state between cases. When omitted, the
+   * process-wide default aggregator is used.
+   */
+  analyticsAggregator?: NotificationAnalyticsAggregator | null;
 }
 
 type ServiceStatus = 'ok' | 'error' | 'not_configured';
@@ -190,6 +201,45 @@ export function createEventsServer(options: EventsServerOptions): http.Server {
         returned: events.length,
         durationMs: Date.now() - startTime,
       });
+      return;
+    }
+
+    // GET /api/analytics
+    if (req.method === 'GET' && url.pathname.startsWith('/api/analytics')) {
+      const aggregator =
+        options.analyticsAggregator !== undefined
+          ? options.analyticsAggregator
+          : getNotificationAnalyticsAggregator();
+
+      if (!aggregator) {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Analytics aggregator unavailable' }));
+        return;
+      }
+
+      const snapshot = aggregator.snapshot();
+      const reset = url.searchParams.get('reset') === 'true';
+
+      logger.info('Handling GET /api/analytics', {
+        requestId,
+        correlationId,
+        totalRecorded: snapshot.totalRecorded,
+        reset,
+        durationMs: Date.now() - startTime,
+      });
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          ...snapshot,
+          ...(reset ? {} : {}),
+        }),
+      );
+
+      if (reset) {
+        aggregator.reset();
+        logger.info('Analytics snapshot reset after read', { requestId, correlationId });
+      }
       return;
     }
 

@@ -2,6 +2,8 @@ import * as StellarSDK from '@stellar/stellar-sdk';
 import { ContractConfig } from '../types';
 import logger from '../utils/logger';
 import { getEventName } from '../utils/event-utils';
+import { getNotificationAnalyticsAggregator, NotificationAnalyticsAggregator } from './notification-analytics-aggregator';
+import { NotificationType } from '../types/scheduled-notification';
 
 export interface RetryQueueOptions {
   baseDelayMs?: number;
@@ -37,12 +39,14 @@ export class NotificationRetryQueue {
   private readonly processIntervalMs: number;
   private timer: ReturnType<typeof setInterval> | null = null;
   private readonly notificationFn: NotificationFn;
+  private readonly analytics: NotificationAnalyticsAggregator | null;
 
   constructor(notificationFn: NotificationFn, options?: RetryQueueOptions) {
     this.notificationFn = notificationFn;
     this.baseDelayMs = options?.baseDelayMs ?? DEFAULTS.baseDelayMs;
     this.maxRetries = options?.maxRetries ?? DEFAULTS.maxRetries;
     this.processIntervalMs = options?.processIntervalMs ?? DEFAULTS.processIntervalMs;
+    this.analytics = getNotificationAnalyticsAggregator();
   }
 
   enqueue(
@@ -111,6 +115,7 @@ export class NotificationRetryQueue {
   private async retryItem(item: RetryItem): Promise<void> {
     const attempt = item.retryCount + 1;
     const fingerprint = buildRetryFingerprint(item.event, item.contractConfig.address);
+    const retryStart = Date.now();
 
     logger.info('Retrying failed notification', {
       requestId: item.requestId,
@@ -118,6 +123,14 @@ export class NotificationRetryQueue {
       contractAddress: item.contractConfig.address,
       attempt,
       maxRetries: this.maxRetries,
+    });
+
+    this.analytics?.record({
+      notificationType: NotificationType.DISCORD,
+      contractAddress: item.contractConfig.address,
+      outcome: 'retry',
+      durationMs: 0,
+      timestamp: retryStart,
     });
 
     const success = await this.notificationFn(item.event, item.contractConfig, item.requestId);
@@ -135,6 +148,14 @@ export class NotificationRetryQueue {
 
     if (attempt >= this.maxRetries) {
       this.queuedFingerprints.delete(fingerprint);
+      this.analytics?.record({
+        notificationType: NotificationType.DISCORD,
+        contractAddress: item.contractConfig.address,
+        outcome: 'failure',
+        durationMs: Date.now() - retryStart,
+        errorReason: `exhausted ${this.maxRetries} retries`,
+        timestamp: Date.now(),
+      });
       logger.error('Notification permanently failed after max retries', {
         requestId: item.requestId,
         eventId: item.event.id,

@@ -3,6 +3,8 @@ import http from 'http';
 import crypto from 'crypto';
 import { createEventsServer, checkStellarRpc, checkDiscord } from './events-server';
 import { eventRegistry } from '../store/event-registry';
+import { NotificationAnalyticsAggregator } from '../services/notification-analytics-aggregator';
+import { NotificationType } from '../types/scheduled-notification';
 
 const mockGetHealth = jest.fn();
 
@@ -289,5 +291,118 @@ describe('POST /api/webhooks', () => {
     const { status, body } = await makePostRequest(server, '/api/events', payload, {});
 
     expect(status).toBe(404);
+  });
+});
+
+describe('GET /api/analytics', () => {
+  let server: http.Server;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  afterEach(async () => {
+    if (server) {
+      await closeServer(server);
+      server = null as unknown as http.Server;
+    }
+  });
+
+  it('returns an empty snapshot when no records are recorded', async () => {
+    const aggregator = new NotificationAnalyticsAggregator();
+    aggregator.reset();
+    server = await startServer({ ...BASE_OPTIONS, analyticsAggregator: aggregator });
+
+    const res = await request(server, 'GET', '/api/analytics');
+    expect(res.status).toBe(200);
+    const body = res.body as Record<string, unknown>;
+    expect(body.totalRecorded).toBe(0);
+    expect(body.windowStart).toBeDefined();
+    expect(body.windowEnd).toBeDefined();
+    expect(body.overall).toBeDefined();
+    expect(body.byType).toEqual([]);
+    expect(body.byContract).toEqual([]);
+    // hourlyBuckets is a fixed-size rolling window: when there are no records
+    // every bucket still exists with zero counters. We assert structure rather
+    // than emptiness so the test is robust to bucket-count changes.
+    expect(Array.isArray(body.hourlyBuckets)).toBe(true);
+    expect((body.hourlyBuckets as unknown[]).length).toBeGreaterThan(0);
+    for (const bucket of body.hourlyBuckets as Array<{ total: number; success: number; failure: number }>) {
+      expect(bucket.total).toBe(0);
+      expect(bucket.success).toBe(0);
+      expect(bucket.failure).toBe(0);
+    }
+    expect(body.errorBreakdown).toEqual({});
+  });
+
+  it('returns aggregated metrics from recorded outcomes', async () => {
+    const aggregator = new NotificationAnalyticsAggregator({ bucketSizeMs: 60_000 });
+    aggregator.reset();
+    const now = Date.now();
+    const baseTs = now;
+    aggregator.record({
+      notificationType: NotificationType.DISCORD,
+      contractAddress: 'CABC',
+      outcome: 'success',
+      durationMs: 120,
+      timestamp: baseTs,
+    });
+    aggregator.record({
+      notificationType: NotificationType.DISCORD,
+      contractAddress: 'CABC',
+      outcome: 'failure',
+      durationMs: 240,
+      errorReason: 'HTTP 500',
+      timestamp: baseTs + 1000,
+    });
+    aggregator.record({
+      notificationType: NotificationType.WEBHOOK,
+      outcome: 'retry',
+      durationMs: 0,
+      timestamp: baseTs + 2000,
+    });
+    server = await startServer({ ...BASE_OPTIONS, analyticsAggregator: aggregator });
+
+    const res = await request(server, 'GET', '/api/analytics');
+    expect(res.status).toBe(200);
+    const body = res.body as Record<string, any>;
+    expect(body.totalRecorded).toBe(3);
+    expect(body.byType.length).toBeGreaterThan(0);
+    const discordRow = body.byType.find(
+      (r: any) => r.notificationType === NotificationType.DISCORD,
+    );
+    expect(discordRow).toBeDefined();
+    expect(discordRow.total).toBe(2);
+    expect(discordRow.success).toBe(1);
+    expect(discordRow.failure).toBe(1);
+    expect(discordRow.successRate).toBeCloseTo(0.5);
+    const contractRow = body.byContract.find(
+      (r: any) => r.contractAddress === 'CABC',
+    );
+    expect(contractRow).toBeDefined();
+    expect(contractRow.total).toBe(2);
+    expect(body.errorBreakdown['HTTP 500']).toBe(1);
+  });
+
+  it('clears aggregator state when reset=true is supplied', async () => {
+    const aggregator = new NotificationAnalyticsAggregator();
+    aggregator.reset();
+    aggregator.record({
+      notificationType: NotificationType.DISCORD,
+      outcome: 'success',
+      durationMs: 50,
+      timestamp: Date.now(),
+    });
+    server = await startServer({ ...BASE_OPTIONS, analyticsAggregator: aggregator });
+
+    const first = await request(server, 'GET', '/api/analytics');
+    expect((first.body as any).totalRecorded).toBe(1);
+
+    const reset = await request(server, 'GET', '/api/analytics?reset=true');
+    expect(reset.status).toBe(200);
+    expect((reset.body as any).totalRecorded).toBe(1); // snapshot returned BEFORE reset
+
+    const after = await request(server, 'GET', '/api/analytics');
+    expect((after.body as any).totalRecorded).toBe(0);
   });
 });
