@@ -3,11 +3,29 @@ import logger from '../utils/logger';
 import { getDatabase } from '../database/database';
 import { RateLimitConfig } from '../types';
 
+export interface RateLimitMetrics {
+  totalRequests: number;
+  blockedRequests: number;
+  allowedRequests: number;
+  uniqueClients: number;
+  topBlockedClients: Array<{ clientId: string; blockCount: number }>;
+  startTime: string;
+}
+
 export class RateLimiter {
   // In-memory cache for client request timestamps: clientId -> timestampMs[]
   private cache = new Map<string, number[]>();
   private config: RateLimitConfig;
   private cleanupInterval: NodeJS.Timeout | null = null;
+  
+  // Metrics tracking
+  private metrics = {
+    totalRequests: 0,
+    blockedRequests: 0,
+    allowedRequests: 0,
+    clientBlockCounts: new Map<string, number>(),
+    startTime: new Date().toISOString(),
+  };
 
   constructor(config: RateLimitConfig) {
     this.config = config;
@@ -98,6 +116,8 @@ export class RateLimiter {
       return true;
     }
 
+    this.metrics.totalRequests++;
+
     const { clientId, clientType } = this.identifyClient(req);
     const now = Date.now();
     const windowMs = this.getClientWindowMs(clientId);
@@ -119,6 +139,12 @@ export class RateLimiter {
     res.setHeader('X-RateLimit-Reset', String(resetTimeSec));
 
     if (isLimitExceeded) {
+      this.metrics.blockedRequests++;
+      
+      // Track blocks per client
+      const currentBlockCount = this.metrics.clientBlockCounts.get(clientId) || 0;
+      this.metrics.clientBlockCounts.set(clientId, currentBlockCount + 1);
+
       const waitMs = oldestTimestamp + windowMs - now;
       const waitSec = Math.ceil(waitMs / 1000);
       res.setHeader('Retry-After', String(waitSec));
@@ -135,6 +161,8 @@ export class RateLimiter {
       );
       return false;
     }
+
+    this.metrics.allowedRequests++;
 
     // Add current request timestamp
     validTimestamps.push(now);
@@ -185,5 +213,46 @@ export class RateLimiter {
   // Helper for tests to clear cache
   public clearCache(): void {
     this.cache.clear();
+  }
+
+  /**
+   * Get current rate limiting metrics
+   */
+  public getMetrics(): RateLimitMetrics {
+    const topBlockedClients = Array.from(this.metrics.clientBlockCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([clientId, blockCount]) => {
+        // Mask API keys for security
+        const maskedId = clientId.includes('.')
+          ? clientId // IP address - show as-is
+          : clientId.length > 8
+          ? `${clientId.slice(0, 8)}...`
+          : '***';
+        
+        return { clientId: maskedId, blockCount };
+      });
+
+    return {
+      totalRequests: this.metrics.totalRequests,
+      blockedRequests: this.metrics.blockedRequests,
+      allowedRequests: this.metrics.allowedRequests,
+      uniqueClients: this.cache.size,
+      topBlockedClients,
+      startTime: this.metrics.startTime,
+    };
+  }
+
+  /**
+   * Reset metrics (useful for testing or periodic resets)
+   */
+  public resetMetrics(): void {
+    this.metrics = {
+      totalRequests: 0,
+      blockedRequests: 0,
+      allowedRequests: 0,
+      clientBlockCounts: new Map<string, number>(),
+      startTime: new Date().toISOString(),
+    };
   }
 }

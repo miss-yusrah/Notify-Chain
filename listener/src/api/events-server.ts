@@ -206,6 +206,36 @@ export function createEventsServer(options: EventsServerOptions): http.Server {
       return;
     }
 
+    // GET /api/rate-limit/metrics
+    if (req.method === 'GET' && url.pathname === '/api/rate-limit/metrics') {
+      if (!rateLimiter) {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Rate limiting not enabled' }));
+        return;
+      }
+
+      const metrics = rateLimiter.getMetrics();
+      const reset = url.searchParams.get('reset') === 'true';
+
+      logger.info('Handling GET /api/rate-limit/metrics', {
+        requestId,
+        correlationId,
+        totalRequests: metrics.totalRequests,
+        blockedRequests: metrics.blockedRequests,
+        reset,
+        durationMs: Date.now() - startTime,
+      });
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(metrics));
+
+      if (reset) {
+        rateLimiter.resetMetrics();
+        logger.info('Rate limit metrics reset after read', { requestId, correlationId });
+      }
+      return;
+    }
+
     // GET /api/analytics
     if (req.method === 'GET' && url.pathname.startsWith('/api/analytics')) {
       const aggregator =

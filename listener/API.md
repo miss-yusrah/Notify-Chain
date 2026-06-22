@@ -343,6 +343,117 @@ Receives a signed webhook event payload. The request must carry a valid HMAC-SHA
 
 ---
 
+## Rate Limiting
+
+The API enforces configurable rate limits to protect against abuse. Limits can be set globally or per-client using API keys or IP addresses.
+
+### Rate Limit Headers
+
+All responses include these headers when rate limiting is enabled:
+
+| Header                  | Description                                              |
+|-------------------------|----------------------------------------------------------|
+| `X-RateLimit-Limit`     | Maximum requests allowed in the current window           |
+| `X-RateLimit-Remaining` | Requests remaining before hitting the limit              |
+| `X-RateLimit-Reset`     | Unix timestamp (seconds) when the window resets          |
+
+When a rate limit is exceeded:
+
+| Header        | Description                                     |
+|---------------|-------------------------------------------------|
+| `Retry-After` | Seconds to wait before retrying the request     |
+
+### GET /api/rate-limit/metrics
+
+Returns real-time rate limiting statistics for monitoring and analysis.
+
+**Query Parameters**
+
+| Name  | Type    | Required | Description                                      |
+|-------|---------|----------|--------------------------------------------------|
+| reset | boolean | No       | If `true`, resets metrics after reading them     |
+
+**Response `200`**
+
+```json
+{
+  "totalRequests": 1543,
+  "blockedRequests": 87,
+  "allowedRequests": 1456,
+  "uniqueClients": 23,
+  "topBlockedClients": [
+    {
+      "clientId": "192.168.1.100",
+      "blockCount": 45
+    },
+    {
+      "clientId": "sk_live_...",
+      "blockCount": 23
+    }
+  ],
+  "startTime": "2024-01-01T12:00:00.000Z"
+}
+```
+
+| Field              | Type   | Description                                                  |
+|--------------------|--------|--------------------------------------------------------------|
+| totalRequests      | number | Total requests processed since server start or last reset    |
+| blockedRequests    | number | Requests that were rate limited                              |
+| allowedRequests    | number | Requests that were allowed through                           |
+| uniqueClients      | number | Number of distinct clients currently tracked                 |
+| topBlockedClients  | array  | Top 10 clients by block count (API keys are masked)          |
+| startTime          | string | ISO 8601 timestamp when metrics tracking started             |
+
+**Response `503`** — rate limiting is disabled
+
+```json
+{ "error": "Rate limiting not enabled" }
+```
+
+**Example — fetch metrics**
+
+```http
+GET /api/rate-limit/metrics HTTP/1.1
+```
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "totalRequests": 1543,
+  "blockedRequests": 87,
+  "allowedRequests": 1456,
+  "uniqueClients": 23,
+  "topBlockedClients": [
+    { "clientId": "192.168.1.100", "blockCount": 45 }
+  ],
+  "startTime": "2024-01-01T12:00:00.000Z"
+}
+```
+
+**Example — fetch and reset metrics**
+
+```http
+GET /api/rate-limit/metrics?reset=true HTTP/1.1
+```
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "totalRequests": 1543,
+  "blockedRequests": 87,
+  "allowedRequests": 1456,
+  "uniqueClients": 23,
+  "topBlockedClients": [],
+  "startTime": "2024-01-01T12:00:00.000Z"
+}
+```
+
+---
+
 ## Health
 
 ### GET /health
