@@ -6,9 +6,8 @@ import { PreferencesUpdateInput } from '../types/preferences';
 import { NotificationAPI } from '../services/notification-api';
 import { NotificationType } from '../types/scheduled-notification';
 import logger from '../utils/logger';
-import { generateRequestId } from '../utils/request-id';
-import { NotificationHistoryService } from '../services/notification-history';
 import { generateRequestId, resolveCorrelationId } from '../utils/request-id';
+import { NotificationHistoryService } from '../services/notification-history';
 import {
   verifySignature,
   extractSignature,
@@ -410,7 +409,6 @@ export function createEventsServer(options: EventsServerOptions): http.Server {
       const endDate = url.searchParams.get('endDate');
 
       logger.info('Handling GET /api/notifications/history', {
-        requestId,
         limit,
         offset,
         status,
@@ -431,14 +429,13 @@ export function createEventsServer(options: EventsServerOptions): http.Server {
 
           logger.info('GET /api/notifications/history complete', {
             requestId,
-            returned: result.records.length,
             total: result.total,
             durationMs: Date.now() - startTime,
           });
         })
         .catch((error) => {
           logger.error('Failed to retrieve notification history', { error, requestId });
-          res.writeHead(500, { 'Content-Type': 'application/json' });
+          logger.error('Failed to retrieve notification history', { error, requestId });
           res.end(JSON.stringify({ error: (error as Error).message }));
         });
       return;
@@ -454,9 +451,7 @@ export function createEventsServer(options: EventsServerOptions): http.Server {
     if (req.method === 'GET' && getPrefsMatch) {
       const userId = decodeURIComponent(getPrefsMatch[1]);
       const prefs = preferenceStore.get(userId);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(prefs));
-      return;
     }
 
     // PUT /api/preferences/:userId
@@ -483,7 +478,6 @@ export function createEventsServer(options: EventsServerOptions): http.Server {
       });
       return;
     }
-
     logger.warn('Unhandled request', { requestId, correlationId, method: req.method, url: req.url });
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Not found' }));
