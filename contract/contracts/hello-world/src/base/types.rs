@@ -21,6 +21,21 @@ pub struct GroupMember {
     pub percentage: u32,
 }
 
+/// A notification stored on-chain with a bounded lifetime.
+///
+/// The notification is considered **expired** — and therefore invalid for any
+/// further interaction — once the ledger timestamp reaches `expires_at`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScheduledNotification {
+    pub id: BytesN<32>,
+    pub creator: Address,
+    /// Ledger timestamp (seconds) at which the notification was scheduled.
+    pub created_at: u64,
+    /// Ledger timestamp (seconds) at or after which the notification is expired.
+    pub expires_at: u64,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PaymentHistory {

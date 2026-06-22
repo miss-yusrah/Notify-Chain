@@ -253,6 +253,42 @@ impl AutoShareContract {
     pub fn cancel_notification(env: Env, notification_id: BytesN<32>, caller: Address) {
         autoshare_logic::cancel_notification(env, notification_id, caller).unwrap();
     }
+
+    // ============================================================================
+    // Notification Expiration
+    // ============================================================================
+
+    /// Schedules a notification on-chain that expires after `ttl_seconds`.
+    ///
+    /// The notification becomes invalid once the ledger timestamp reaches
+    /// `created_at + ttl_seconds`. Emits a `NotificationScheduled` event.
+    pub fn schedule_notification(
+        env: Env,
+        notification_id: BytesN<32>,
+        creator: Address,
+        ttl_seconds: u64,
+    ) {
+        autoshare_logic::schedule_notification(env, notification_id, creator, ttl_seconds).unwrap();
+    }
+
+    /// Returns the stored details for a scheduled notification.
+    pub fn get_notification(
+        env: Env,
+        notification_id: BytesN<32>,
+    ) -> base::types::ScheduledNotification {
+        autoshare_logic::get_notification(env, notification_id).unwrap()
+    }
+
+    /// Returns whether a scheduled notification has expired.
+    pub fn is_notification_expired(env: Env, notification_id: BytesN<32>) -> bool {
+        autoshare_logic::is_notification_expired(env, notification_id).unwrap()
+    }
+
+    /// Finalizes the expiry of a notification whose lifetime has elapsed,
+    /// emitting a `NotificationExpired` event. Callable by anyone.
+    pub fn expire_notification(env: Env, notification_id: BytesN<32>) {
+        autoshare_logic::expire_notification(env, notification_id).unwrap();
+    }
 }
 
 #[cfg(test)]
@@ -278,4 +314,7 @@ mod tests {
 
     #[path = "../tests/notification_test.rs"]
     mod notification_test;
+
+    #[path = "../tests/expiration_test.rs"]
+    mod expiration_test;
 }

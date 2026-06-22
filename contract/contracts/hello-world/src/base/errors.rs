@@ -48,4 +48,12 @@ pub enum Error {
     NameTooLong = 21,
     /// Triggered when the number of members exceeds the maximum allowed.
     TooManyMembers = 22,
+    /// Triggered when interacting with a notification that has already expired.
+    NotificationExpired = 23,
+    /// Triggered when an invalid expiration duration is provided (e.g., zero or
+    /// one that overflows the ledger clock).
+    InvalidExpirationDuration = 24,
+    /// Triggered when attempting to expire a notification whose lifetime has not
+    /// yet elapsed.
+    NotificationNotExpired = 25,
 }
