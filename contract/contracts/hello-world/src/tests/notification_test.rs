@@ -1,5 +1,10 @@
 //! Tests for notification category metadata attached to emitted events.
 //!
+//! Every event the contract publishes carries notification metadata so off-chain
+//! consumers can route by category and urgency. These tests verify:
+//! - each action emits the expected category and priority, and
+//! - the change is backward compatible: the event name remains the first topic,
+//!   the category remains the trailing topic, and payload data is unchanged.
 //! Every event the contract publishes now carries a [`NotificationCategory`] as
 //! its trailing topic so off-chain consumers can subscribe to / filter by whole
 //! categories. These tests verify:
@@ -58,6 +63,16 @@ fn priority_of(env: &soroban_sdk::Env, event_name: &str) -> Option<NotificationP
     NotificationPriority::try_from_val(env, &last).ok()
 }
 
+/// Extracts priority metadata for the latest event named `event_name`.
+fn priority_of(env: &soroban_sdk::Env, event_name: &str) -> Option<NotificationPriority> {
+    let topics = topics_of(env, event_name)?;
+    if topics.len() < 2 {
+        return None;
+    }
+    let priority = topics.get(topics.len() - 2)?;
+    NotificationPriority::try_from_val(env, &priority).ok()
+}
+
 /// Returns the category of the most recently emitted event — i.e. the metadata a
 /// streaming consumer would read off the event as it arrives.
 ///
@@ -71,6 +86,15 @@ fn latest_category(env: &soroban_sdk::Env) -> Option<NotificationCategory> {
     }
     let category_topic = topics.get(n - 2)?;
     NotificationCategory::try_from_val(env, &category_topic).ok()
+}
+
+fn latest_priority(env: &soroban_sdk::Env) -> Option<NotificationPriority> {
+    let (_addr, topics, _data) = env.events().all().last()?;
+    if topics.len() < 2 {
+        return None;
+    }
+    let priority = topics.get(topics.len() - 2)?;
+    NotificationPriority::try_from_val(env, &priority).ok()
 }
 
 #[test]
@@ -94,6 +118,28 @@ fn test_created_event_has_group_category() {
     );
     assert_eq!(
         priority_of(&test_env.env, "autoshare_created"),
+        Some(NotificationPriority::Standard)
+    );
+}
+
+#[test]
+fn test_created_group_stores_standard_priority() {
+    let test_env = setup_test_env();
+    let client = AutoShareContractClient::new(&test_env.env, &test_env.autoshare_contract);
+    let creator = test_env.users.get(0).unwrap().clone();
+    let token = test_env.mock_tokens.get(0).unwrap().clone();
+
+    let id = create_test_group(
+        &test_env.env,
+        &test_env.autoshare_contract,
+        &creator,
+        &Vec::new(&test_env.env),
+        1,
+        &token,
+    );
+
+    let details = client.get(&id);
+    assert_eq!(details.priority, NotificationPriority::Standard);
         Some(NotificationPriority::Medium)
     );
 }
@@ -127,6 +173,7 @@ fn test_updated_event_has_group_category() {
     );
     assert_eq!(
         priority_of(&test_env.env, "autoshare_updated"),
+        Some(NotificationPriority::Standard)
         Some(NotificationPriority::Medium)
     );
 }
@@ -154,6 +201,7 @@ fn test_deactivate_and_activate_events_have_group_category() {
     );
     assert_eq!(
         priority_of(&test_env.env, "group_deactivated"),
+        Some(NotificationPriority::Standard)
         Some(NotificationPriority::Low)
     );
 
@@ -164,6 +212,7 @@ fn test_deactivate_and_activate_events_have_group_category() {
     );
     assert_eq!(
         priority_of(&test_env.env, "group_activated"),
+        Some(NotificationPriority::Standard)
         Some(NotificationPriority::Low)
     );
 }
@@ -207,6 +256,7 @@ fn test_admin_transfer_event_has_admin_category() {
     );
     assert_eq!(
         priority_of(&test_env.env, "admin_transferred"),
+        Some(NotificationPriority::High)
         Some(NotificationPriority::Critical)
     );
 }
@@ -236,6 +286,7 @@ fn test_withdrawal_event_has_financial_category() {
     );
     assert_eq!(
         priority_of(&test_env.env, "withdrawal"),
+        Some(NotificationPriority::Critical)
         Some(NotificationPriority::High)
     );
 }
@@ -280,6 +331,10 @@ fn test_events_can_be_filtered_by_category() {
         latest_category(&test_env.env),
         Some(NotificationCategory::Group)
     );
+    assert_eq!(
+        latest_priority(&test_env.env),
+        Some(NotificationPriority::Standard)
+    );
     route();
 
     // Admin event -> skipped by this subscriber.
@@ -287,6 +342,10 @@ fn test_events_can_be_filtered_by_category() {
     assert_eq!(
         latest_category(&test_env.env),
         Some(NotificationCategory::Admin)
+    );
+    assert_eq!(
+        latest_priority(&test_env.env),
+        Some(NotificationPriority::High)
     );
     route();
     client.unpause(&test_env.admin);
@@ -297,6 +356,10 @@ fn test_events_can_be_filtered_by_category() {
     assert_eq!(
         latest_category(&test_env.env),
         Some(NotificationCategory::Financial)
+    );
+    assert_eq!(
+        latest_priority(&test_env.env),
+        Some(NotificationPriority::Critical)
     );
     route();
 
@@ -493,6 +556,7 @@ fn test_created_event_backward_compatible_shape() {
     );
 
     let topics = topics_of(&test_env.env, "autoshare_created").expect("event emitted");
+    // [0] event name, [1] creator (unchanged), [2] priority, [3] category.
     // [0] event name, [1] creator (unchanged), [2] category (now second-to-last),
     // [3] priority (new trailing topic).
     assert_eq!(topics.len(), 4);
@@ -503,8 +567,12 @@ fn test_created_event_backward_compatible_shape() {
     let topic_creator = Address::try_from_val(&test_env.env, &topics.get(1).unwrap()).unwrap();
     assert_eq!(topic_creator, creator);
 
+    let priority =
+        NotificationPriority::try_from_val(&test_env.env, &topics.get(2).unwrap()).unwrap();
+    assert_eq!(priority, NotificationPriority::Standard);
+
     let category =
-        NotificationCategory::try_from_val(&test_env.env, &topics.get(2).unwrap()).unwrap();
+        NotificationCategory::try_from_val(&test_env.env, &topics.get(3).unwrap()).unwrap();
     assert_eq!(category, NotificationCategory::Group);
 
     // The newly added trailing topic is the priority.

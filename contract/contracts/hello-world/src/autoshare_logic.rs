@@ -76,6 +76,7 @@ pub fn create_autoshare(
         id: id.clone(),
         name,
         creator: creator.clone(),
+        priority: NotificationPriority::Standard,
         usage_count,
         total_usages_paid: usage_count,
         members: Vec::new(&env),
@@ -111,6 +112,7 @@ pub fn create_autoshare(
 
     AutoshareCreated {
         creator: creator.clone(),
+        priority: details.priority,
         category: NotificationCategory::Group,
         priority: NotificationPriority::Medium,
         id: id.clone(),
@@ -262,6 +264,7 @@ pub fn initialize_admin(env: Env, admin: Address) {
 fn publish_authorization_failure(env: &Env, caller: &Address, action: &str) {
     AuthorizationFailure {
         caller: caller.clone(),
+        priority: NotificationPriority::High,
         category: NotificationCategory::Admin,
         priority: NotificationPriority::Critical,
         action: String::from_str(env, action),
@@ -299,6 +302,7 @@ pub fn transfer_admin(env: Env, current_admin: Address, new_admin: Address) -> R
     env.storage().persistent().set(&DataKey::Admin, &new_admin);
     AdminTransferred {
         old_admin: current_admin,
+        priority: NotificationPriority::High,
         category: NotificationCategory::Admin,
         priority: NotificationPriority::Critical,
         new_admin,
@@ -324,6 +328,7 @@ pub fn pause(env: Env, admin: Address) -> Result<(), Error> {
 
     env.storage().persistent().set(&pause_key, &true);
     ContractPaused {
+        priority: NotificationPriority::High,
         category: NotificationCategory::Admin,
         priority: NotificationPriority::High,
     }
@@ -344,6 +349,7 @@ pub fn unpause(env: Env, admin: Address) -> Result<(), Error> {
 
     env.storage().persistent().set(&pause_key, &false);
     ContractUnpaused {
+        priority: NotificationPriority::High,
         category: NotificationCategory::Admin,
         priority: NotificationPriority::High,
     }
@@ -682,6 +688,7 @@ pub fn update_members(
 
     AutoshareUpdated {
         updater: caller,
+        priority: details.priority,
         category: NotificationCategory::Group,
         priority: NotificationPriority::Medium,
         id: id.clone(),
@@ -719,6 +726,7 @@ pub fn deactivate_group(env: Env, id: BytesN<32>, caller: Address) -> Result<(),
 
     GroupDeactivated {
         creator: caller,
+        priority: details.priority,
         category: NotificationCategory::Group,
         priority: NotificationPriority::Low,
         id: id.clone(),
@@ -756,6 +764,7 @@ pub fn activate_group(env: Env, id: BytesN<32>, caller: Address) -> Result<(), E
 
     GroupActivated {
         creator: caller,
+        priority: details.priority,
         category: NotificationCategory::Group,
         priority: NotificationPriority::Low,
         id: id.clone(),
@@ -805,6 +814,7 @@ pub fn withdraw(
     Withdrawal {
         token,
         recipient,
+        priority: NotificationPriority::Critical,
         category: NotificationCategory::Financial,
         priority: NotificationPriority::High,
         amount,

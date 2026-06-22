@@ -1,3 +1,4 @@
+use crate::base::events::NotificationPriority;
 use soroban_sdk::{contracttype, Address, BytesN, String, Vec};
 
 #[contracttype]
@@ -6,6 +7,7 @@ pub struct AutoShareDetails {
     pub id: BytesN<32>,
     pub name: String,
     pub creator: Address,
+    pub priority: NotificationPriority,
     pub usage_count: u32,
     pub total_usages_paid: u32,
     pub members: Vec<GroupMember>,
