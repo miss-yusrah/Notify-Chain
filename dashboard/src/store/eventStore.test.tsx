@@ -8,6 +8,37 @@ import { useEventStore } from '../store/eventStore';
 import { generateMockEvents } from '../utils/eventData';
 
 describe('event store selective subscriptions', () => {
+  it('deduplicates events before rendering notification rows', () => {
+    const [firstEvent, secondEvent] = generateMockEvents(2);
+
+    useEventStore.getState().setEvents([firstEvent, firstEvent, secondEvent]);
+
+    render(
+      <div style={{ height: 600, width: 800 }}>
+        <EventListPanel />
+      </div>
+    );
+
+    expect(screen.getAllByRole('article')).toHaveLength(2);
+    expect(screen.getAllByText(`Ledger ${firstEvent.ledger}`)).toHaveLength(1);
+    expect(screen.getAllByText(`Ledger ${secondEvent.ledger}`)).toHaveLength(1);
+  });
+
+  it('does not append duplicate notifications after repeated refresh data', () => {
+    const [firstEvent, secondEvent] = generateMockEvents(2);
+
+    useEventStore.getState().setEvents([firstEvent]);
+    useEventStore.getState().appendEvents([firstEvent, secondEvent, secondEvent]);
+
+    const storedEvents = useEventStore.getState().events;
+
+    expect(storedEvents).toHaveLength(2);
+    expect(storedEvents.map((event) => event.eventId)).toEqual([
+      firstEvent.eventId,
+      secondEvent.eventId,
+    ]);
+  });
+
   it('filter updates do not require reloading the full event collection', async () => {
     useEventStore.setState({
       events: generateMockEvents(100),

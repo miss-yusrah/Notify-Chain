@@ -16,6 +16,19 @@ interface EventStoreState {
   setError: (error: string | null) => void;
 }
 
+function dedupeEventsById(events: BlockchainEvent[]): BlockchainEvent[] {
+  const seenEventIds = new Set<string>();
+
+  return events.filter((event) => {
+    if (seenEventIds.has(event.eventId)) {
+      return false;
+    }
+
+    seenEventIds.add(event.eventId);
+    return true;
+  });
+}
+
 export const useEventStore = create<EventStoreState>((set) => ({
   events: [],
   filters: {
@@ -25,10 +38,10 @@ export const useEventStore = create<EventStoreState>((set) => ({
   },
   isLoading: false,
   error: null,
-  setEvents: (events) => set({ events }),
+  setEvents: (events) => set({ events: dedupeEventsById(events) }),
   appendEvents: (events) =>
     set((state) => ({
-      events: [...state.events, ...events],
+      events: dedupeEventsById([...state.events, ...events]),
     })),
   setSearch: (search) =>
     set((state) => ({
