@@ -167,3 +167,70 @@ BEGIN
   SELECT RAISE(ABORT, 'Audit records are immutable');
 END;
 
+-- Event processing deduplication table - tracks processed events to prevent duplicates during reorgs
+-- This table ensures idempotent processing of events even after blockchain reorganizations
+CREATE TABLE IF NOT EXISTS processed_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  
+  -- Event identification (fingerprint components)
+  event_id TEXT NOT NULL,                   -- Unique identifier from blockchain RPC
+  contract_address TEXT NOT NULL,           -- Contract that emitted the event
+  fingerprint TEXT NOT NULL UNIQUE,         -- Composite key: contract_address:event_id (for faster lookups)
+  
+  -- Processing metadata
+  ledger_number INTEGER NOT NULL,           -- Ledger in which the event occurred
+  tx_hash TEXT,                             -- Transaction hash (if available)
+  event_type VARCHAR(50) NOT NULL,          -- Type from RPC (contract, system, etc)
+  processed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  
+  -- Reorg detection and tracking
+  is_reorg_duplicate BOOLEAN NOT NULL DEFAULT 0, -- Flag indicating this is a duplicate from a reorg
+  reorg_detection_count INTEGER NOT NULL DEFAULT 0, -- Number of times this event was redetected
+  last_redetected_at DATETIME,              -- When the event was last detected again (for reorg monitoring)
+  
+  -- Status and metadata
+  status VARCHAR(20) NOT NULL DEFAULT 'PROCESSED', -- PROCESSED, SKIPPED, ERROR
+  notification_sent BOOLEAN NOT NULL DEFAULT 0,     -- Whether a notification was sent for this event
+  error_reason TEXT                         -- If status is ERROR, what went wrong
+);
+
+-- Indexes for efficient lookups
+CREATE INDEX IF NOT EXISTS idx_processed_events_fingerprint 
+  ON processed_events(fingerprint);
+
+CREATE INDEX IF NOT EXISTS idx_processed_events_contract_event 
+  ON processed_events(contract_address, event_id);
+
+CREATE INDEX IF NOT EXISTS idx_processed_events_processed_at 
+  ON processed_events(processed_at);
+
+CREATE INDEX IF NOT EXISTS idx_processed_events_reorg_duplicates 
+  ON processed_events(is_reorg_duplicate, processed_at) 
+  WHERE is_reorg_duplicate = 1;
+
+CREATE INDEX IF NOT EXISTS idx_processed_events_ledger_contract 
+  ON processed_events(ledger_number, contract_address);
+
+-- Cursor tracking for event polling to detect reorgs
+CREATE TABLE IF NOT EXISTS polling_cursors (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  
+  -- Contract tracking
+  contract_address TEXT NOT NULL UNIQUE,    -- Which contract this cursor is for
+  
+  -- Cursor information
+  cursor TEXT NOT NULL,                     -- Last known cursor from RPC
+  ledger_number INTEGER NOT NULL,           -- Ledger number associated with this cursor
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  
+  -- Reorg detection
+  reorg_detected BOOLEAN NOT NULL DEFAULT 0, -- Whether a reorg was detected on the last poll
+  reorg_detection_count INTEGER NOT NULL DEFAULT 0 -- Total number of reorgs detected for this contract
+);
+
+CREATE INDEX IF NOT EXISTS idx_polling_cursors_contract 
+  ON polling_cursors(contract_address);
+
+CREATE INDEX IF NOT EXISTS idx_polling_cursors_updated_at 
+  ON polling_cursors(updated_at);
+

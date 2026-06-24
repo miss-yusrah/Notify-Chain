@@ -162,13 +162,25 @@ event stream into three concrete things:
  │  EventSubscriber                   │
  │  - Poll on interval                │
  │  - Cursor persisted to SQLite      │
+ │  - Detect reorgs from ledger nums  │
  └────────────────┬───────────────────┘
                   │ raw events
                   ▼
+ ┌────────────────────────────────────────┐
+ │  Persistent Deduplication Layer        │
+ │  - EventDeduplicationService           │
+ │  - Check processed_events table        │
+ │  - Mark reorg duplicates               │
+ │  - Track polling cursors               │
+ │  - (Prevents reorg-induced dups)       │
+ └────────────────┬───────────────────────┘
+                  │ 
+                  ▼
  ┌────────────────────────────────────┐
- │  Deduplicator + Event Registry     │
- │  - In-memory LRU + DB index        │
- │  - Normalizes to internal schema   │
+ │  In-Memory Deduplicator            │
+ │  - NotificationDeduplicator (LRU)  │
+ │  - Event Registry                  │
+ │  - (Short-term cache layer)        │
  └────────────────┬───────────────────┘
                   │ normalized events
         ┌─────────┴──────────┐
@@ -187,6 +199,51 @@ event stream into three concrete things:
                        │  Dashboard (React)  │
                        └─────────────────────┘
 ```
+
+### 4.1a Event Deduplication Safeguards
+
+To handle blockchain reorganizations (reorgs), NotifyChain employs **two-layer
+deduplication**:
+
+#### Layer 1: Persistent Deduplication (survives reorgs & restarts)
+- **Service**: `EventDeduplicationService` in `listener/src/services/`
+- **Storage**: `processed_events` and `polling_cursors` SQLite tables
+- **Guarantees**:
+  - Permanent record of all processed events
+  - Detects reorg duplicates by ledger number comparison
+  - Persists cursor positions for each contract
+  - Survives service restarts
+
+#### Layer 2: In-Memory Deduplication (short-term cache)
+- **Service**: `NotificationDeduplicator` (existing)
+- **Storage**: In-memory LRU map (60-second default window)
+- **Purpose**: Catch recent duplicates without DB hits
+- **Complement**: Works alongside persistent layer
+
+**How Reorg Detection Works**:
+
+1. Each polling cycle, compare event ledger with last known `polling_cursors.ledger`
+2. If new ledger < last ledger → reorg detected
+3. Increment `polling_cursors.reorg_detection_count`
+4. When same event re-appears, it's marked as `is_reorg_duplicate = true`
+5. Application skips duplicate notification and Discord send
+
+**Example Reorg Scenario**:
+```
+Normal flow:      Events: e1(L100), e2(L105), e3(L110)
+                  Cursor: L110
+                  
+Reorg occurs:     Ledger drops to L95
+                  Cursor detects: 95 < 110 → REORG!
+                  
+Recovery:         Re-fetch e1(L100), e2(L105)
+                  Both detected as duplicates
+                  Notifications skipped (already sent)
+```
+
+For detailed monitoring, troubleshooting, and operational guidance, see:
+- `REORG-DEDUPLICATION-MONITORING.md` — Metrics, alerts, and best practices
+- `listener/src/services/event-deduplication-service.ts` — Implementation
 
 ### 4.2 Module Map
 
