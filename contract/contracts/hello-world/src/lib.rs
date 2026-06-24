@@ -21,8 +21,15 @@ pub mod mock_token;
 #[contract]
 pub struct AutoShareContract;
 
+const VERSION: u32 = 1;
+
 #[contractimpl]
 impl AutoShareContract {
+    /// Returns the current version of the contract.
+    pub fn version(_env: Env) -> u32 {
+        VERSION
+    }
+
     // ============================================================================
     // Admin Management
     // ============================================================================
@@ -102,8 +109,14 @@ impl AutoShareContract {
     }
 
     /// Adds a member to a group with specified percentage.
-    pub fn add_group_member(env: Env, id: BytesN<32>, address: Address, percentage: u32) {
-        autoshare_logic::add_group_member(env, id, address, percentage).unwrap();
+    pub fn add_group_member(
+        env: Env,
+        id: BytesN<32>,
+        caller: Address,
+        address: Address,
+        percentage: u32,
+    ) {
+        autoshare_logic::add_group_member(env, id, caller, address, percentage).unwrap();
     }
 
     /// Deactivates a group. Only the creator can deactivate.
@@ -227,25 +240,97 @@ impl AutoShareContract {
     pub fn reduce_usage(env: Env, id: BytesN<32>) {
         autoshare_logic::reduce_usage(env, id).unwrap();
     }
+
+    // ============================================================================
+    // Scheduled Notification Management
+    // ============================================================================
+
+    /// Cancels a scheduled notification and emits a ScheduledNotificationCancelled event.
+    ///
+    /// The `notification_id` uniquely identifies the notification being cancelled.
+    /// Callers must authenticate. The contract is paused-aware: cancellations are
+    /// rejected while the contract is paused.
+    pub fn cancel_notification(env: Env, notification_id: BytesN<32>, caller: Address) {
+        autoshare_logic::cancel_notification(env, notification_id, caller).unwrap();
+    }
+
+    // ============================================================================
+    // Notification Expiration
+    // ============================================================================
+
+    /// Schedules a notification on-chain that expires after `ttl_seconds`.
+    ///
+    /// The notification becomes invalid once the ledger timestamp reaches
+    /// `created_at + ttl_seconds`. Emits a `NotificationScheduled` event.
+    pub fn schedule_notification(
+        env: Env,
+        notification_id: BytesN<32>,
+        creator: Address,
+        ttl_seconds: u64,
+    ) {
+        autoshare_logic::schedule_notification(env, notification_id, creator, ttl_seconds).unwrap();
+    }
+
+    /// Returns the stored details for a scheduled notification.
+    pub fn get_notification(
+        env: Env,
+        notification_id: BytesN<32>,
+    ) -> base::types::ScheduledNotification {
+        autoshare_logic::get_notification(env, notification_id).unwrap()
+    }
+
+    /// Returns whether a scheduled notification has expired.
+    pub fn is_notification_expired(env: Env, notification_id: BytesN<32>) -> bool {
+        autoshare_logic::is_notification_expired(env, notification_id).unwrap()
+    }
+
+    /// Finalizes the expiry of a notification whose lifetime has elapsed,
+    /// emitting a `NotificationExpired` event. Callable by anyone.
+    pub fn expire_notification(env: Env, notification_id: BytesN<32>) {
+        autoshare_logic::expire_notification(env, notification_id).unwrap();
+    }
+
+    /// Revokes a scheduled notification, preventing any further interaction with it.
+    ///
+    /// Only the notification creator or the contract admin can revoke a notification.
+    /// The notification must not already be revoked or expired. Emits a `NotificationRevoked` event.
+    pub fn revoke_notification(env: Env, notification_id: BytesN<32>, caller: Address) {
+        autoshare_logic::revoke_notification(env, notification_id, caller).unwrap();
+    }
+
+    /// Returns whether a scheduled notification has been revoked.
+    pub fn is_notification_revoked(env: Env, notification_id: BytesN<32>) -> bool {
+        autoshare_logic::is_notification_revoked(env, notification_id).unwrap()
+    }
 }
-
-// 3. Link the tests (Requirement: Unit Tests)
-#[cfg(test)]
-#[path = "tests/autoshare_test.rs"]
-mod autoshare_test; // Links the internal tests/autoshare_test.rs inside src
-
-#[cfg(test)]
-#[path = "tests/pause_test.rs"]
-mod pause_test;
-
-#[cfg(test)]
-#[path = "tests/mock_token_test.rs"]
-mod mock_token_test;
 
 #[cfg(test)]
 #[path = "tests/test_utils.rs"]
 pub mod test_utils;
 
 #[cfg(test)]
-#[path = "tests/test_utils_test.rs"]
-mod test_utils_test;
+mod tests {
+    #[path = "../tests/autoshare_test.rs"]
+    mod autoshare_test;
+
+    #[path = "../tests/pause_test.rs"]
+    mod pause_test;
+
+    #[path = "../tests/mock_token_test.rs"]
+    mod mock_token_test;
+
+    #[path = "../tests/version_test.rs"]
+    mod version_test;
+
+    #[path = "../tests/test_utils_test.rs"]
+    mod test_utils_test;
+
+    #[path = "../tests/notification_test.rs"]
+    mod notification_test;
+
+    #[path = "../tests/expiration_test.rs"]
+    mod expiration_test;
+
+    #[path = "../tests/revocation_test.rs"]
+    mod revocation_test;
+}

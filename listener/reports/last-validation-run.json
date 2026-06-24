@@ -1,0 +1,8 @@
+{
+  "isValid": false,
+  "processedCount": 0,
+  "errors": [
+    "Item at index [1]: Duplicate recipient detected ('discord_channel_alpha'). Batch throttling enforced.",
+    "Item at index [2]: Missing required fields. (Must contain 'id', 'recipient', 'channel', 'message')"
+  ]
+}

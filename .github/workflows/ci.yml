@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  pull_request:
+
+jobs:
+  frontend:
+    name: Frontend (lint, typecheck, test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: "npm"
+          cache-dependency-path: dashboard/package-lock.json
+      - name: Install dependencies
+        working-directory: dashboard
+        run: npm ci
+      - name: Run lint
+        working-directory: dashboard
+        run: npm run lint
+      - name: TypeScript check (build)
+        working-directory: dashboard
+        run: npm run build
+      - name: Run tests
+        working-directory: dashboard
+        run: npm test --silent
+
+  listener:
+    name: Listener (lint, typecheck, test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: listener/package-lock.json
+      - name: Install dependencies
+        working-directory: listener
+        run: npm ci
+      - name: Run lint
+        working-directory: listener
+        run: npm run lint
+      - name: TypeScript check
+        working-directory: listener
+        run: npm run typecheck
+      - name: Run tests
+        working-directory: listener
+        run: npm test --silent
+
+  rust:
+    name: Rust (fmt check, tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+      - name: Check formatting
+        working-directory: contract
+        run: |
+          rustup component add rustfmt || true
+          cargo fmt --all -- --check
+      - name: Run tests
+        working-directory: contract
+        run: cargo test --workspace --all-features --verbose
