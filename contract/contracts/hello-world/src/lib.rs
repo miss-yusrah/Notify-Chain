@@ -302,6 +302,21 @@ impl AutoShareContract {
     pub fn is_notification_revoked(env: Env, notification_id: BytesN<32>) -> bool {
         autoshare_logic::is_notification_revoked(env, notification_id).unwrap()
     }
+
+    /// Extends the expiration period of a scheduled notification by `extension_seconds`.
+    ///
+    /// Only the notification creator or the contract admin can extend it.
+    /// The notification must exist, not already be revoked, and not have expired.
+    /// Emits a `NotificationExtended` event.
+    pub fn extend_notification_expiry(
+        env: Env,
+        notification_id: BytesN<32>,
+        caller: Address,
+        extension_seconds: u64,
+    ) {
+        autoshare_logic::extend_notification_expiry(env, notification_id, caller, extension_seconds)
+            .unwrap();
+    }
 }
 
 #[cfg(test)]

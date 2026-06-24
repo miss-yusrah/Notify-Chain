@@ -2,8 +2,8 @@ use crate::base::errors::Error;
 use crate::base::events::{
     AdminTransferred, AuthorizationFailure, AutoshareCreated, AutoshareUpdated, ContractPaused,
     ContractUnpaused, GroupActivated, GroupDeactivated, NotificationCategory, NotificationExpired,
-    NotificationPriority, NotificationRevoked, NotificationScheduled, ScheduledNotificationCancelled,
-    Withdrawal,
+    NotificationExtended, NotificationPriority, NotificationRevoked, NotificationScheduled,
+    ScheduledNotificationCancelled, Withdrawal,
 };
 use crate::base::types::{AutoShareDetails, GroupMember, PaymentHistory, ScheduledNotification};
 use soroban_sdk::{contracttype, token, Address, BytesN, Env, String, Vec};
@@ -1083,3 +1083,71 @@ pub fn is_notification_revoked(env: Env, notification_id: BytesN<32>) -> Result<
     let notification = get_notification(env, notification_id)?;
     Ok(is_revoked(&notification))
 }
+
+/// Extends the expiration period of a scheduled notification by `extension_seconds`.
+///
+/// Only authorized callers (the notification creator or the contract admin) can
+/// extend a notification. The notification must exist, not already be revoked,
+/// and not have expired. Emits a [`NotificationExtended`] event.
+pub fn extend_notification_expiry(
+    env: Env,
+    notification_id: BytesN<32>,
+    caller: Address,
+    extension_seconds: u64,
+) -> Result<(), Error> {
+    caller.require_auth();
+
+    if get_paused_status(&env) {
+        return Err(Error::ContractPaused);
+    }
+
+    if extension_seconds == 0 {
+        return Err(Error::InvalidExpirationDuration);
+    }
+
+    let key = DataKey::ScheduledNotification(notification_id.clone());
+    let mut notification = load_notification(&env, &notification_id).ok_or(Error::NotFound)?;
+
+    // Check if revoked
+    if is_revoked(&notification) {
+        return Err(Error::NotificationRevoked);
+    }
+
+    // Check if expired
+    if is_expired(&env, &notification) {
+        return Err(Error::NotificationExpired);
+    }
+
+    // Check authorization: only creator or admin can extend
+    let admin = get_admin(env.clone()).ok();
+    let is_creator = caller == notification.creator;
+    let is_admin = admin.as_ref().map_or(false, |a| caller == *a);
+
+    if !is_creator && !is_admin {
+        return Err(Error::Unauthorized);
+    }
+
+    // Update expires_at
+    let new_expires_at = notification
+        .expires_at
+        .checked_add(extension_seconds)
+        .ok_or(Error::InvalidExpirationDuration)?;
+
+    notification.expires_at = new_expires_at;
+
+    // Store updated notification
+    env.storage().persistent().set(&key, &notification);
+
+    // Emit extension event
+    NotificationExtended {
+        notification_id,
+        caller,
+        category: NotificationCategory::Notification,
+        priority: NOTIFICATION_PRIORITY,
+        new_expires_at,
+    }
+    .publish(&env);
+
+    Ok(())
+}
+
