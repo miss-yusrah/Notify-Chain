@@ -33,6 +33,9 @@ import {
   serializeTemplate,
 } from './template-api';
 import { CreateNotificationTemplateInput } from '../types/notification-template';
+import { handleArchiveRequest } from './archive-api';
+import { ArchiveStore } from '../services/archive-store';
+import { ArchiveService } from '../services/archive-service';
 
 export interface EventsServerOptions {
   port: number;
@@ -49,6 +52,10 @@ export interface EventsServerOptions {
    */
   analyticsAggregator?: NotificationAnalyticsAggregator | null;
   templateService?: NotificationTemplateService | null;
+  /** Archive store for retrieval endpoints (optional). */
+  archiveStore?: ArchiveStore | null;
+  /** Archive service for the admin /run endpoint (optional). */
+  archiveService?: ArchiveService | null;
 }
 
 type ServiceStatus = 'ok' | 'error' | 'not_configured';
@@ -698,6 +705,15 @@ export function createEventsServer(options: EventsServerOptions): http.Server {
         }
       });
       return;
+    }
+
+    // GET /api/archive, GET /api/archive/:id, POST /api/archive/run
+    if (options.archiveStore && (url.pathname === '/api/archive' || url.pathname.startsWith('/api/archive/'))) {
+      const handled = await handleArchiveRequest(req, res, {
+        store: options.archiveStore,
+        service: options.archiveService,
+      }, requestId);
+      if (handled) return;
     }
 
     logger.warn('Unhandled request', {

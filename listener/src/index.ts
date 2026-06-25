@@ -10,6 +10,9 @@ import { TemplateAuditTrail } from './services/template-audit-trail';
 import { getTemplateCache } from './services/notification-template-cache';
 import { NotificationAPI } from './services/notification-api';
 import { CleanupService } from './services/cleanup-service';
+import { ArchiveService } from './services/archive-service';
+import { ArchiveStore } from './services/archive-store';
+import { loadArchiveConfig } from './services/archive-config';
 import { initializeDatabase } from './database/database';
 import { DiscordNotificationService } from './services/discord-notification';
 import { eventRegistry } from './store/event-registry';
@@ -27,6 +30,8 @@ async function main() {
   let notificationAPI: NotificationAPI | null = null;
   let templateService: NotificationTemplateService | null = null;
   let cleanupService: CleanupService | null = null;
+  let archiveService: ArchiveService | null = null;
+  let archiveStore: ArchiveStore | null = null;
 
   try {
     logger.info('Initializing database');
@@ -39,6 +44,16 @@ async function main() {
 
     cleanupService = new CleanupService(db, eventRegistry, config.cleanup);
     cleanupService.start();
+
+    // Archive service: moves old notifications to the archive table.
+    const archiveCfg = loadArchiveConfig();
+    archiveStore = new ArchiveStore(db);
+    archiveService = new ArchiveService(db, archiveCfg);
+    await archiveService.initialize();
+    if (archiveCfg.enabled) {
+      archiveService.start();
+      logger.info('ArchiveService started');
+    }
 
     const templateRepository = new NotificationTemplateRepository(
       db,
@@ -82,6 +97,8 @@ async function main() {
     notificationAPI,
     templateService,
     rateLimit: config.rateLimit,
+    archiveStore,
+    archiveService,
   });
 
   const subscriber = new EventSubscriber(config);
@@ -92,6 +109,10 @@ async function main() {
 
     if (cleanupService) {
       await cleanupService.stop();
+    }
+
+    if (archiveService) {
+      archiveService.stop();
     }
 
     if (scheduler) {
