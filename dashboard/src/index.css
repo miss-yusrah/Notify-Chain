@@ -460,6 +460,117 @@ body {
   padding: 24px 0 12px;
 }
 
+.indexing-health {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 18px 18px 16px;
+  background: rgba(255, 255, 255, 0.02);
+  display: grid;
+  gap: 14px;
+}
+
+.indexing-health__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.indexing-health__eyebrow {
+  margin: 0 0 6px;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #a78bfa;
+}
+
+.indexing-health__title {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.indexing-health__meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.indexing-health__status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.indexing-health__status--synced {
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.14);
+}
+
+.indexing-health__status--syncing {
+  color: #f4b400;
+  background: rgba(244, 180, 0, 0.14);
+}
+
+.indexing-health__status--degraded {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.14);
+}
+
+.indexing-health__updated {
+  color: #9aa0a6;
+  font-size: 0.85rem;
+}
+
+.indexing-health__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.indexing-health__metric {
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 14px;
+  padding: 12px 12px 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.indexing-health__metric dt {
+  font-size: 0.75rem;
+  color: #9aa0a6;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 6px;
+}
+
+.indexing-health__metric dd {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 650;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+.indexing-health__detail {
+  margin: 0;
+  color: #9aa0a6;
+  font-size: 0.9rem;
+}
+
+.indexing-health__error {
+  margin: 0;
+  color: #f87171;
+  font-size: 0.9rem;
+}
+
 .event-explorer__eyebrow {
   margin: 0 0 10px;
   font-size: 0.85rem;
