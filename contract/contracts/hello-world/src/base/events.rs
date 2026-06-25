@@ -237,3 +237,19 @@ pub struct NotificationRevoked {
     pub priority: NotificationPriority,
     pub revoked_at: u64,
 }
+
+/// Emitted when a scheduled notification's expiry period is extended by an authorized sender.
+#[contractevent(data_format = "single-value")]
+#[derive(Clone)]
+pub struct NotificationExtended {
+    #[topic]
+    pub notification_id: BytesN<32>,
+    #[topic]
+    pub caller: Address,
+    #[topic]
+    pub category: NotificationCategory,
+    #[topic]
+    pub priority: NotificationPriority,
+    pub new_expires_at: u64,
+}
+

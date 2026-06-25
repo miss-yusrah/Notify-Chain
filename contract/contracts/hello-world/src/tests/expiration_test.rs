@@ -11,7 +11,9 @@ use crate::base::events::NotificationCategory;
 use crate::test_utils::setup_test_env;
 use crate::AutoShareContractClient;
 
-use soroban_sdk::testutils::{Events, Ledger};
+extern crate std;
+
+use soroban_sdk::testutils::{Address as _, Events, Ledger};
 use soroban_sdk::{Address, BytesN, Env, Symbol, TryFromVal, Val, Vec};
 
 /// One hour, in seconds — a representative configurable duration.
@@ -326,3 +328,153 @@ fn test_cancellation_blocked_when_contract_paused() {
         "cancellation must be rejected while the contract is paused"
     );
 }
+
+#[test]
+fn test_extend_notification_expiry_by_creator() {
+    let test_env = setup_test_env();
+    let client = AutoShareContractClient::new(&test_env.env, &test_env.autoshare_contract);
+    let creator = test_env.users.get(0).unwrap().clone();
+
+    set_now(&test_env.env, 1_000);
+    let id = make_id(&test_env.env, 20);
+    client.schedule_notification(&id, &creator, &ONE_HOUR);
+
+    // Extend by 30 minutes
+    client.extend_notification_expiry(&id, &creator, &1_800);
+
+    // Verify NotificationExtended event is emitted
+    let topics = topics_of(&test_env.env, "notification_extended").expect("event must be emitted");
+    // [0] name, [1] notification_id, [2] caller, [3] category, [4] priority.
+    assert_eq!(topics.len(), 5);
+
+    let topic_id = BytesN::<32>::try_from_val(&test_env.env, &topics.get(1).unwrap()).unwrap();
+    assert_eq!(topic_id, id);
+
+    let topic_caller = Address::try_from_val(&test_env.env, &topics.get(2).unwrap()).unwrap();
+    assert_eq!(topic_caller, creator);
+
+    // Data payload carries the new expires_at.
+    let data = data_of(&test_env.env, "notification_extended").unwrap();
+    let data_new_expires_at = u64::try_from_val(&test_env.env, &data).unwrap();
+    assert_eq!(data_new_expires_at, 1_000 + ONE_HOUR + 1_800);
+
+    // Query storage state
+    let stored = client.get_notification(&id);
+    assert_eq!(stored.expires_at, 1_000 + ONE_HOUR + 1_800);
+}
+
+#[test]
+fn test_extend_notification_expiry_by_admin() {
+    let test_env = setup_test_env();
+    let client = AutoShareContractClient::new(&test_env.env, &test_env.autoshare_contract);
+    let creator = test_env.users.get(0).unwrap().clone();
+    let admin = test_env.admin.clone();
+
+    set_now(&test_env.env, 1_000);
+    let id = make_id(&test_env.env, 21);
+    client.schedule_notification(&id, &creator, &ONE_HOUR);
+
+    // Admin can extend
+    client.extend_notification_expiry(&id, &admin, &1_800);
+
+    let stored = client.get_notification(&id);
+    assert_eq!(stored.expires_at, 1_000 + ONE_HOUR + 1_800);
+}
+
+#[test]
+#[should_panic]
+fn test_extend_notification_expiry_by_unauthorized_user_fails() {
+    let test_env = setup_test_env();
+    let client = AutoShareContractClient::new(&test_env.env, &test_env.autoshare_contract);
+    let creator = test_env.users.get(0).unwrap().clone();
+    let unauthorized = Address::generate(&test_env.env);
+
+    set_now(&test_env.env, 1_000);
+    let id = make_id(&test_env.env, 22);
+    client.schedule_notification(&id, &creator, &ONE_HOUR);
+
+    // Must panic
+    client.extend_notification_expiry(&id, &unauthorized, &1_800);
+}
+
+#[test]
+#[should_panic]
+fn test_extend_notification_expiry_while_contract_paused_fails() {
+    let test_env = setup_test_env();
+    let client = AutoShareContractClient::new(&test_env.env, &test_env.autoshare_contract);
+    let creator = test_env.users.get(0).unwrap().clone();
+    let admin = test_env.admin.clone();
+
+    set_now(&test_env.env, 1_000);
+    let id = make_id(&test_env.env, 23);
+    client.schedule_notification(&id, &creator, &ONE_HOUR);
+
+    client.pause(&admin);
+
+    // Must panic
+    client.extend_notification_expiry(&id, &creator, &1_800);
+}
+
+#[test]
+#[should_panic]
+fn test_cannot_extend_expired_notification() {
+    let test_env = setup_test_env();
+    let client = AutoShareContractClient::new(&test_env.env, &test_env.autoshare_contract);
+    let creator = test_env.users.get(0).unwrap().clone();
+
+    set_now(&test_env.env, 1_000);
+    let id = make_id(&test_env.env, 24);
+    client.schedule_notification(&id, &creator, &ONE_HOUR);
+
+    // Skip past expiration
+    set_now(&test_env.env, 1_000 + ONE_HOUR + 1);
+
+    // Must panic
+    client.extend_notification_expiry(&id, &creator, &1_800);
+}
+
+#[test]
+#[should_panic]
+fn test_cannot_extend_revoked_notification() {
+    let test_env = setup_test_env();
+    let client = AutoShareContractClient::new(&test_env.env, &test_env.autoshare_contract);
+    let creator = test_env.users.get(0).unwrap().clone();
+
+    set_now(&test_env.env, 1_000);
+    let id = make_id(&test_env.env, 25);
+    client.schedule_notification(&id, &creator, &ONE_HOUR);
+
+    client.revoke_notification(&id, &creator);
+
+    // Must panic
+    client.extend_notification_expiry(&id, &creator, &1_800);
+}
+
+#[test]
+#[should_panic]
+fn test_cannot_extend_nonexistent_notification() {
+    let test_env = setup_test_env();
+    let client = AutoShareContractClient::new(&test_env.env, &test_env.autoshare_contract);
+    let caller = Address::generate(&test_env.env);
+
+    let id = make_id(&test_env.env, 26);
+
+    // Must panic
+    client.extend_notification_expiry(&id, &caller, &1_800);
+}
+
+#[test]
+#[should_panic]
+fn test_cannot_extend_by_zero_seconds() {
+    let test_env = setup_test_env();
+    let client = AutoShareContractClient::new(&test_env.env, &test_env.autoshare_contract);
+    let creator = test_env.users.get(0).unwrap().clone();
+
+    set_now(&test_env.env, 1_000);
+    let id = make_id(&test_env.env, 27);
+    client.schedule_notification(&id, &creator, &ONE_HOUR);
+
+    // Must panic
+    client.extend_notification_expiry(&id, &creator, &0);
+}
+

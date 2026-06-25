@@ -13,7 +13,10 @@ export function useFilteredEvents() {
         events,
         filters.search,
         filters.contractAddress,
-        filters.eventType
+        filters.eventType,
+        filters.status,
+        filters.dateFrom,
+        filters.dateTo
       ),
     [events, filters]
   );

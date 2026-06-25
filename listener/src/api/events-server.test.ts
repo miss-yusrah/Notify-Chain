@@ -5,6 +5,7 @@ import { createEventsServer, checkStellarRpc, checkDiscord } from './events-serv
 import { eventRegistry } from '../store/event-registry';
 import { NotificationAnalyticsAggregator } from '../services/notification-analytics-aggregator';
 import { NotificationType } from '../types/scheduled-notification';
+import { Database, getDatabase } from '../database/database';
 
 const mockGetHealth = jest.fn();
 const mockSimulateTransaction = jest.fn();
@@ -437,5 +438,61 @@ describe('GET /api/analytics', () => {
 
     const after = await request(server, 'GET', '/api/analytics');
     expect((after.body as any).totalRecorded).toBe(0);
+  });
+});
+
+describe('GET /api/search/suggestions API', () => {
+  let server: http.Server;
+  let db: Database;
+
+  beforeAll(async () => {
+    db = getDatabase(':memory:');
+    await db.initialize();
+  });
+
+  afterAll(async () => {
+    await db.close();
+  });
+
+  beforeEach(async () => {
+    await db.run('DELETE FROM processed_events');
+    await db.run('DELETE FROM scheduled_notifications');
+    await db.run('DELETE FROM notification_templates');
+    
+    server = createEventsServer({ port: 0, stellarRpcUrl: 'http://localhost' });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  it('returns suggestions successfully from the API', async () => {
+    await db.run(
+      `INSERT INTO scheduled_notifications 
+       (payload, notification_type, target_recipient, execute_at, contract_address)
+       VALUES (?, ?, ?, ?, ?)`,
+      [JSON.stringify({}), 'discord', 'test-user-recipient', '2026-06-24T12:00:00Z', 'C-Address']
+    );
+
+    const res = await request(server, 'GET', '/api/search/suggestions?q=test');
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('recipients');
+    expect((res.body as any).recipients).toContain('test-user-recipient');
+  });
+
+  it('supports limit query parameter', async () => {
+    for (let i = 1; i <= 5; i++) {
+      await db.run(
+        `INSERT INTO scheduled_notifications 
+         (payload, notification_type, target_recipient, execute_at)
+         VALUES (?, ?, ?, ?)`,
+        [JSON.stringify({}), 'discord', `user-${i}`, '2026-06-24T12:00:00Z']
+      );
+    }
+
+    const res = await request(server, 'GET', '/api/search/suggestions?q=user&limit=2');
+    expect(res.status).toBe(200);
+    expect((res.body as any).recipients.length).toBe(2);
   });
 });

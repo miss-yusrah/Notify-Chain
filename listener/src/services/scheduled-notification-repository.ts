@@ -215,13 +215,14 @@ export class ScheduledNotificationRepository {
   }
 
   /**
-   * Mark notification as failed or retry
+   * Mark notification as failed or retry (sets next_retry_at for backoff scheduling)
    */
   async markAsFailedOrRetry(
     id: number,
     error: Error,
     currentRetryCount: number,
-    maxRetries: number
+    maxRetries: number,
+    nextRetryAt?: Date
   ): Promise<void> {
     const isFailed = currentRetryCount >= maxRetries;
     const newStatus = isFailed ? NotificationStatus.FAILED : NotificationStatus.PENDING;
@@ -233,6 +234,7 @@ export class ScheduledNotificationRepository {
         retry_count = ?,
         last_error = ?,
         error_details = ?,
+        next_retry_at = ?,
         processing_completed_at = ?,
         processor_id = NULL,
         lock_expires_at = NULL
@@ -250,6 +252,7 @@ export class ScheduledNotificationRepository {
       currentRetryCount + 1,
       error.message,
       errorDetails,
+      isFailed ? null : (nextRetryAt?.toISOString() ?? null),
       isFailed ? new Date().toISOString() : null,
       id,
     ]);
@@ -259,7 +262,67 @@ export class ScheduledNotificationRepository {
       newStatus,
       retryCount: currentRetryCount + 1,
       maxRetries,
+      nextRetryAt: nextRetryAt?.toISOString(),
     });
+  }
+
+  /**
+   * Fetch PENDING notifications whose next_retry_at is due (or null, meaning immediately schedulable).
+   * Used by RetryScheduler to pick up failed notifications for re-attempt.
+   */
+  async fetchDueRetries(
+    processorId: string,
+    lockTimeoutMs: number,
+    batchSize: number = 10,
+    requestId?: string
+  ): Promise<ScheduledNotification[]> {
+    const now = new Date();
+    const lockExpiresAt = new Date(now.getTime() + lockTimeoutMs);
+
+    const updateSql = `
+      UPDATE scheduled_notifications
+      SET
+        status = ?,
+        processor_id = ?,
+        lock_expires_at = ?,
+        processing_started_at = ?
+      WHERE id IN (
+        SELECT id FROM scheduled_notifications
+        WHERE status = ?
+          AND retry_count > 0
+          AND (next_retry_at IS NULL OR next_retry_at <= ?)
+        ORDER BY priority ASC, next_retry_at ASC
+        LIMIT ?
+      )
+    `;
+
+    const updateResult = await this.db.run(updateSql, [
+      NotificationStatus.PROCESSING,
+      processorId,
+      lockExpiresAt.toISOString(),
+      now.toISOString(),
+      NotificationStatus.PENDING,
+      now.toISOString(),
+      batchSize,
+    ]);
+
+    if (updateResult.changes === 0) return [];
+
+    const selectSql = `
+      SELECT * FROM scheduled_notifications
+      WHERE processor_id = ? AND status = ? AND lock_expires_at = ?
+        AND retry_count > 0
+    `;
+
+    const rows = await this.db.all<ScheduledNotificationRow>(selectSql, [
+      processorId,
+      NotificationStatus.PROCESSING,
+      lockExpiresAt.toISOString(),
+    ]);
+
+    logger.info('Fetched due retries', { requestId, count: rows.length, processorId });
+
+    return rows.map(this.rowToModel.bind(this));
   }
 
   /**
@@ -395,6 +458,7 @@ export class ScheduledNotificationRepository {
       contractAddress: row.contract_address,
       priority: row.priority,
       metadata: row.metadata,
+      nextRetryAt: row.next_retry_at ? new Date(row.next_retry_at) : null,
     };
   }
 }

@@ -2,12 +2,30 @@ use crate::base::errors::Error;
 use crate::base::events::{
     AdminTransferred, AuthorizationFailure, AutoshareCreated, AutoshareUpdated, ContractPaused,
     ContractUnpaused, GroupActivated, GroupDeactivated, NotificationCategory, NotificationExpired,
-    NotificationPriority, NotificationRevoked, NotificationScheduled, ScheduledNotificationCancelled,
-    Withdrawal,
+    NotificationExtended, NotificationPriority, NotificationRevoked, NotificationScheduled,
+    ScheduledNotificationCancelled, Withdrawal,
 };
 use crate::base::types::{AutoShareDetails, GroupMember, PaymentHistory, ScheduledNotification};
 use soroban_sdk::{contracttype, token, Address, BytesN, Env, String, Vec};
 
+/// Storage key layout (optimized):
+///
+/// # Instance storage  (cheap reads, evicted together with the contract instance)
+/// - `Admin`           – single admin address, read on every privileged call
+/// - `SupportedTokens` – token allow-list, read on every create/topup
+/// - `UsageFee`        – single u32 fee, read on every create/topup
+/// - `IsPaused`        – bool flag, read on every mutating call
+///
+/// # Persistent storage (survives TTL renewal, per-entry cost)
+/// - `AutoShare(id)`          – full group details incl. members
+/// - `AllGroups`              – ordered list of all group IDs
+/// - `UserPaymentHistory(addr)` – per-user payment records
+/// - `GroupPaymentHistory(id)`  – per-group payment records
+///
+/// # Removed (was duplicate / wasted storage)
+/// - `GroupMembers(id)` – members are embedded in `AutoShareDetails.members`
+///   and were being written twice on every mutation.  Reads now go directly
+///   to `AutoShareDetails`, halving storage writes for member operations.
 /// Maximum allowed length for AutoShare group names.
 const MAX_NAME_LENGTH: u32 = 100;
 /// Maximum number of members allowed per AutoShare group.
@@ -17,9 +35,6 @@ const MAX_MEMBERS: u32 = 50;
 pub enum DataKey {
     AutoShare(BytesN<32>),
     AllGroups,
-    Admin,
-    SupportedTokens,
-    UsageFee,
     UserPaymentHistory(Address),
     GroupPaymentHistory(BytesN<32>),
     GroupMembers(BytesN<32>),
@@ -27,6 +42,17 @@ pub enum DataKey {
     ScheduledNotification(BytesN<32>),
     NotificationRevokers(BytesN<32>),
 }
+
+// ============================================================================
+// Instance-storage helpers for hot config data
+// (instance storage costs less per-read than persistent and shares TTL with
+//  the contract instance, making it ideal for values accessed on every call)
+// ============================================================================
+
+const INSTANCE_ADMIN: &str = "Admin";
+const INSTANCE_PAUSED: &str = "IsPaused";
+const INSTANCE_FEE: &str = "UsageFee";
+const INSTANCE_TOKENS: &str = "SuppTkns";
 
 pub fn create_autoshare(
     env: Env,
@@ -84,7 +110,8 @@ pub fn create_autoshare(
         is_active: true,
     };
 
-    // Store the details in persistent storage
+    // Store the details in persistent storage (members are embedded inside details,
+    // no separate GroupMembers entry needed – saves one persistent write per creation)
     env.storage().persistent().set(&key, &details);
 
     // Add to all groups list
@@ -96,11 +123,6 @@ pub fn create_autoshare(
         .unwrap_or(Vec::new(&env));
     all_groups.push_back(id.clone());
     env.storage().persistent().set(&all_groups_key, &all_groups);
-
-    // Initialize empty members list
-    let members_key = DataKey::GroupMembers(id.clone());
-    let empty_members: Vec<GroupMember> = Vec::new(&env);
-    env.storage().persistent().set(&members_key, &empty_members);
 
     // Record payment history
     record_payment(
@@ -159,20 +181,9 @@ pub fn get_groups_by_creator(env: Env, creator: Address) -> Vec<AutoShareDetails
 
 /// Checks if a given address is a member of a specific AutoShare group.
 pub fn is_group_member(env: Env, id: BytesN<32>, address: Address) -> Result<bool, Error> {
-    // First check if the group exists
-    let group_key = DataKey::AutoShare(id.clone());
-    if !env.storage().persistent().has(&group_key) {
-        return Err(Error::NotFound);
-    }
-
-    let members_key = DataKey::GroupMembers(id);
-    let members: Vec<GroupMember> = env
-        .storage()
-        .persistent()
-        .get(&members_key)
-        .unwrap_or(Vec::new(&env));
-
-    for member in members.iter() {
+    // Load the group (also validates it exists)
+    let details = get_autoshare(env, id)?;
+    for member in details.members.iter() {
         if member.address == address {
             return Ok(true);
         }
@@ -244,20 +255,17 @@ pub fn add_group_member(
 
 pub fn initialize_admin(env: Env, admin: Address) {
     admin.require_auth();
-    let admin_key = DataKey::Admin;
 
-    // Only set if not already initialized
-    if !env.storage().persistent().has(&admin_key) {
-        env.storage().persistent().set(&admin_key, &admin);
+    // Only set if not already initialized (instance storage)
+    if !env.storage().instance().has(&INSTANCE_ADMIN) {
+        env.storage().instance().set(&INSTANCE_ADMIN, &admin);
 
-        // Initialize default usage fee (10 tokens per usage)
-        let usage_fee_key = DataKey::UsageFee;
-        env.storage().persistent().set(&usage_fee_key, &10u32);
+        // Initialize default usage fee (10 tokens per usage) in instance storage
+        env.storage().instance().set(&INSTANCE_FEE, &10u32);
 
-        // Initialize empty supported tokens list
-        let tokens_key = DataKey::SupportedTokens;
+        // Initialize empty supported tokens list in instance storage
         let empty_tokens: Vec<Address> = Vec::new(&env);
-        env.storage().persistent().set(&tokens_key, &empty_tokens);
+        env.storage().instance().set(&INSTANCE_TOKENS, &empty_tokens);
     }
 }
 
@@ -272,11 +280,10 @@ fn publish_authorization_failure(env: &Env, caller: &Address, action: &str) {
 }
 
 fn require_admin(env: &Env, caller: &Address) -> Result<(), Error> {
-    let admin_key = DataKey::Admin;
     let admin: Address = env
         .storage()
-        .persistent()
-        .get(&admin_key)
+        .instance()
+        .get(&INSTANCE_ADMIN)
         .ok_or(Error::Unauthorized)?;
 
     if admin != *caller {
@@ -289,8 +296,8 @@ fn require_admin(env: &Env, caller: &Address) -> Result<(), Error> {
 
 pub fn get_admin(env: Env) -> Result<Address, Error> {
     env.storage()
-        .persistent()
-        .get(&DataKey::Admin)
+        .instance()
+        .get(&INSTANCE_ADMIN)
         .ok_or(Error::NotFound)
 }
 
@@ -298,7 +305,7 @@ pub fn transfer_admin(env: Env, current_admin: Address, new_admin: Address) -> R
     current_admin.require_auth();
     require_admin(&env, &current_admin)?;
 
-    env.storage().persistent().set(&DataKey::Admin, &new_admin);
+    env.storage().instance().set(&INSTANCE_ADMIN, &new_admin);
     AdminTransferred {
         old_admin: current_admin,
         category: NotificationCategory::Admin,
@@ -311,19 +318,25 @@ pub fn transfer_admin(env: Env, current_admin: Address, new_admin: Address) -> R
 
 // ============================================================================
 // Pause Management
+// (IsPaused moved to instance storage – it is read on every mutating call)
 // ============================================================================
 
 pub fn pause(env: Env, admin: Address) -> Result<(), Error> {
     admin.require_auth();
     require_admin(&env, &admin)?;
 
-    let pause_key = DataKey::IsPaused;
-    let is_paused: bool = env.storage().persistent().get(&pause_key).unwrap_or(false);
+    let is_paused: bool = env
+        .storage()
+        .instance()
+        .get(&INSTANCE_PAUSED)
+        .unwrap_or(false);
 
     if is_paused {
         return Err(Error::AlreadyPaused);
     }
 
+    env.storage().instance().set(&INSTANCE_PAUSED, &true);
+    ContractPaused {}.publish(&env);
     env.storage().persistent().set(&pause_key, &true);
     ContractPaused {
         category: NotificationCategory::Admin,
@@ -337,13 +350,18 @@ pub fn unpause(env: Env, admin: Address) -> Result<(), Error> {
     admin.require_auth();
     require_admin(&env, &admin)?;
 
-    let pause_key = DataKey::IsPaused;
-    let is_paused: bool = env.storage().persistent().get(&pause_key).unwrap_or(false);
+    let is_paused: bool = env
+        .storage()
+        .instance()
+        .get(&INSTANCE_PAUSED)
+        .unwrap_or(false);
 
     if !is_paused {
         return Err(Error::NotPaused);
     }
 
+    env.storage().instance().set(&INSTANCE_PAUSED, &false);
+    ContractUnpaused {}.publish(&env);
     env.storage().persistent().set(&pause_key, &false);
     ContractUnpaused {
         category: NotificationCategory::Admin,
@@ -354,23 +372,25 @@ pub fn unpause(env: Env, admin: Address) -> Result<(), Error> {
 }
 
 pub fn get_paused_status(env: &Env) -> bool {
-    let pause_key = DataKey::IsPaused;
-    env.storage().persistent().get(&pause_key).unwrap_or(false)
+    env.storage()
+        .instance()
+        .get(&INSTANCE_PAUSED)
+        .unwrap_or(false)
 }
 
 // ============================================================================
 // Supported Tokens Management
+// (SupportedTokens moved to instance storage – checked on every create/topup)
 // ============================================================================
 
 pub fn add_supported_token(env: Env, token: Address, admin: Address) -> Result<(), Error> {
     admin.require_auth();
     require_admin(&env, &admin)?;
 
-    let tokens_key = DataKey::SupportedTokens;
     let mut tokens: Vec<Address> = env
         .storage()
-        .persistent()
-        .get(&tokens_key)
+        .instance()
+        .get(&INSTANCE_TOKENS)
         .unwrap_or(Vec::new(&env));
 
     // Check if token is already supported
@@ -381,7 +401,7 @@ pub fn add_supported_token(env: Env, token: Address, admin: Address) -> Result<(
     }
 
     tokens.push_back(token);
-    env.storage().persistent().set(&tokens_key, &tokens);
+    env.storage().instance().set(&INSTANCE_TOKENS, &tokens);
     Ok(())
 }
 
@@ -389,11 +409,10 @@ pub fn remove_supported_token(env: Env, token: Address, admin: Address) -> Resul
     admin.require_auth();
     require_admin(&env, &admin)?;
 
-    let tokens_key = DataKey::SupportedTokens;
     let tokens: Vec<Address> = env
         .storage()
-        .persistent()
-        .get(&tokens_key)
+        .instance()
+        .get(&INSTANCE_TOKENS)
         .unwrap_or(Vec::new(&env));
 
     let mut new_tokens: Vec<Address> = Vec::new(&env);
@@ -411,15 +430,14 @@ pub fn remove_supported_token(env: Env, token: Address, admin: Address) -> Resul
         return Err(Error::NotFound);
     }
 
-    env.storage().persistent().set(&tokens_key, &new_tokens);
+    env.storage().instance().set(&INSTANCE_TOKENS, &new_tokens);
     Ok(())
 }
 
 pub fn get_supported_tokens(env: Env) -> Vec<Address> {
-    let tokens_key = DataKey::SupportedTokens;
     env.storage()
-        .persistent()
-        .get(&tokens_key)
+        .instance()
+        .get(&INSTANCE_TOKENS)
         .unwrap_or(Vec::new(&env))
 }
 
@@ -435,6 +453,7 @@ pub fn is_token_supported(env: Env, token: Address) -> bool {
 
 // ============================================================================
 // Payment Configuration
+// (UsageFee moved to instance storage – read on every create/topup)
 // ============================================================================
 
 pub fn set_usage_fee(env: Env, fee: u32, admin: Address) -> Result<(), Error> {
@@ -444,14 +463,15 @@ pub fn set_usage_fee(env: Env, fee: u32, admin: Address) -> Result<(), Error> {
         return Err(Error::InvalidAmount);
     }
 
-    let fee_key = DataKey::UsageFee;
-    env.storage().persistent().set(&fee_key, &fee);
+    env.storage().instance().set(&INSTANCE_FEE, &fee);
     Ok(())
 }
 
 pub fn get_usage_fee(env: Env) -> u32 {
-    let fee_key = DataKey::UsageFee;
-    env.storage().persistent().get(&fee_key).unwrap_or(10u32)
+    env.storage()
+        .instance()
+        .get(&INSTANCE_FEE)
+        .unwrap_or(10u32)
 }
 
 // ============================================================================
@@ -674,13 +694,9 @@ pub fn update_members(
         return Err(Error::InvalidTotalPercentage);
     }
 
-    // Update members in details
+    // Update members in details (single write – no separate GroupMembers key)
     details.members = new_members.clone();
     env.storage().persistent().set(&key, &details);
-
-    // Also update the GroupMembers storage
-    let members_key = DataKey::GroupMembers(id.clone());
-    env.storage().persistent().set(&members_key, &new_members);
 
     AutoshareUpdated {
         updater: caller,
@@ -1083,3 +1099,71 @@ pub fn is_notification_revoked(env: Env, notification_id: BytesN<32>) -> Result<
     let notification = get_notification(env, notification_id)?;
     Ok(is_revoked(&notification))
 }
+
+/// Extends the expiration period of a scheduled notification by `extension_seconds`.
+///
+/// Only authorized callers (the notification creator or the contract admin) can
+/// extend a notification. The notification must exist, not already be revoked,
+/// and not have expired. Emits a [`NotificationExtended`] event.
+pub fn extend_notification_expiry(
+    env: Env,
+    notification_id: BytesN<32>,
+    caller: Address,
+    extension_seconds: u64,
+) -> Result<(), Error> {
+    caller.require_auth();
+
+    if get_paused_status(&env) {
+        return Err(Error::ContractPaused);
+    }
+
+    if extension_seconds == 0 {
+        return Err(Error::InvalidExpirationDuration);
+    }
+
+    let key = DataKey::ScheduledNotification(notification_id.clone());
+    let mut notification = load_notification(&env, &notification_id).ok_or(Error::NotFound)?;
+
+    // Check if revoked
+    if is_revoked(&notification) {
+        return Err(Error::NotificationRevoked);
+    }
+
+    // Check if expired
+    if is_expired(&env, &notification) {
+        return Err(Error::NotificationExpired);
+    }
+
+    // Check authorization: only creator or admin can extend
+    let admin = get_admin(env.clone()).ok();
+    let is_creator = caller == notification.creator;
+    let is_admin = admin.as_ref().map_or(false, |a| caller == *a);
+
+    if !is_creator && !is_admin {
+        return Err(Error::Unauthorized);
+    }
+
+    // Update expires_at
+    let new_expires_at = notification
+        .expires_at
+        .checked_add(extension_seconds)
+        .ok_or(Error::InvalidExpirationDuration)?;
+
+    notification.expires_at = new_expires_at;
+
+    // Store updated notification
+    env.storage().persistent().set(&key, &notification);
+
+    // Emit extension event
+    NotificationExtended {
+        notification_id,
+        caller,
+        category: NotificationCategory::Notification,
+        priority: NOTIFICATION_PRIORITY,
+        new_expires_at,
+    }
+    .publish(&env);
+
+    Ok(())
+}
+

@@ -7,6 +7,8 @@ import { NotificationType } from '../types/scheduled-notification';
 
 export interface RetryQueueOptions {
   baseDelayMs?: number;
+  multiplier?: number;
+  jitter?: boolean;
   maxRetries?: number;
   processIntervalMs?: number;
 }
@@ -21,6 +23,8 @@ interface RetryItem {
 
 const DEFAULTS = {
   baseDelayMs: 5_000,
+  multiplier: 2,
+  jitter: true,
   maxRetries: 5,
   processIntervalMs: 5_000,
 };
@@ -35,6 +39,8 @@ export class NotificationRetryQueue {
   private queue: RetryItem[] = [];
   private readonly queuedFingerprints: Set<string> = new Set();
   private readonly baseDelayMs: number;
+  private readonly multiplier: number;
+  private readonly jitter: boolean;
   private readonly maxRetries: number;
   private readonly processIntervalMs: number;
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -44,6 +50,8 @@ export class NotificationRetryQueue {
   constructor(notificationFn: NotificationFn, options?: RetryQueueOptions) {
     this.notificationFn = notificationFn;
     this.baseDelayMs = options?.baseDelayMs ?? DEFAULTS.baseDelayMs;
+    this.multiplier = options?.multiplier ?? DEFAULTS.multiplier;
+    this.jitter = options?.jitter ?? DEFAULTS.jitter;
     this.maxRetries = options?.maxRetries ?? DEFAULTS.maxRetries;
     this.processIntervalMs = options?.processIntervalMs ?? DEFAULTS.processIntervalMs;
     this.analytics = getNotificationAnalyticsAggregator();
@@ -181,7 +189,8 @@ export class NotificationRetryQueue {
   }
 
   private calculateDelay(retryCount: number): number {
-    return this.baseDelayMs * Math.pow(2, retryCount);
+    const base = this.baseDelayMs * Math.pow(this.multiplier, retryCount);
+    return this.jitter ? base * (0.5 + Math.random() * 0.5) : base;
   }
 }
 

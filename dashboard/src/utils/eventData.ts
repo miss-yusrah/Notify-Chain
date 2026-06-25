@@ -36,22 +36,26 @@ export function filterEvents(
   events: BlockchainEvent[],
   search: string,
   contractAddress: string,
-  eventType: string
+  eventType: string,
+  status: import('../types/event').NotificationStatus = 'all',
+  dateFrom = '',
+  dateTo = ''
 ): BlockchainEvent[] {
   const normalizedSearch = search.trim().toLowerCase();
+  const fromMs = dateFrom ? new Date(dateFrom).getTime() : 0;
+  // dateTo is inclusive: include the entire day
+  const toMs = dateTo ? new Date(dateTo).getTime() + 86_399_999 : Infinity;
 
   return events.filter((event) => {
-    if (contractAddress !== 'all' && event.contractAddress !== contractAddress) {
-      return false;
-    }
+    if (contractAddress !== 'all' && event.contractAddress !== contractAddress) return false;
+    if (eventType !== 'all' && event.eventName !== eventType) return false;
 
-    if (eventType !== 'all' && event.eventName !== eventType) {
-      return false;
-    }
+    if (status === 'read' && !event.read) return false;
+    if (status === 'unread' && event.read) return false;
 
-    if (!normalizedSearch) {
-      return true;
-    }
+    if (event.receivedAt < fromMs || event.receivedAt > toMs) return false;
+
+    if (!normalizedSearch) return true;
 
     return (
       event.eventId.toLowerCase().includes(normalizedSearch) ||

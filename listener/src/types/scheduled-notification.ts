@@ -38,6 +38,8 @@ export interface ScheduledNotification {
   contractAddress?: string | null;
   priority: number;
   metadata?: string | null; // JSON string
+  /** When the next retry should be attempted (null if not retrying). */
+  nextRetryAt?: Date | null;
 }
 
 export interface CreateScheduledNotificationInput {
@@ -73,6 +75,7 @@ export interface ScheduledNotificationRow {
   contract_address: string | null;
   priority: number;
   metadata: string | null;
+  next_retry_at: string | null;
 }
 
 export interface NotificationExecutionLog {
