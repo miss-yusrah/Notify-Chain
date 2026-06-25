@@ -19,18 +19,53 @@ To contribute to NotifyChain, make sure you have:
 - [Node.js](https://nodejs.org/) (for listener and dashboard components)
 - Basic understanding of Soroban smart contracts, Git, and GitHub
 
-### Setup
+### Setup (Fork Workflow)
 
-1. Fork the repository
-2. Clone your fork:
+To set up a local development environment, follow this fork-and-clone workflow:
+
+1. **Fork the Repository**: Visit [Notify-Chain](https://github.com/Core-Foundry/Notify-Chain) and click the **Fork** button to create a copy of the repository under your GitHub account.
+2. **Clone your Fork**:
    ```bash
    git clone https://github.com/your-username/Notify-Chain.git
    cd Notify-Chain
    ```
-3. Add the upstream repository:
+3. **Configure Upstream Remote**: Keep your fork updated by pointing to the upstream repository:
    ```bash
    git remote add upstream https://github.com/Core-Foundry/Notify-Chain.git
    ```
+4. **Verify Remotes**: Run `git remote -v` to ensure your configuration is correct:
+   ```bash
+   origin    https://github.com/your-username/Notify-Chain.git (fetch)
+   origin    https://github.com/your-username/Notify-Chain.git (push)
+   upstream  https://github.com/Core-Foundry/Notify-Chain.git (fetch)
+   upstream  https://github.com/Core-Foundry/Notify-Chain.git (push)
+   ```
+
+### Syncing Your Fork
+
+Before starting any new work or creating a branch, always pull the latest changes from the upstream `main` branch to prevent merge conflicts:
+
+```bash
+git checkout main
+git fetch upstream
+git merge upstream/main
+git push origin main
+```
+
+## Issue Claiming Process
+
+To ensure that efforts are not duplicated and contributors can work on tasks they are interested in, we use the following issue claiming process:
+
+1. **Browse Open Issues**: Explore the [GitHub Issue Tracker](https://github.com/Core-Foundry/Notify-Chain/issues) to find tasks. Look for issues labeled `good first issue` if you are new to the codebase.
+2. **Claim an Issue**:
+   * Comment on the issue stating: `I would like to work on this issue.`
+   * Wait for a maintainer to assign the issue to you. Once assigned, your username will appear under "Assignees" on GitHub.
+   * Do **not** begin working on an issue or open a Pull Request for it unless it has been formally assigned to you. This prevents two developers from working on the same problem.
+3. **Active Work & SLA**:
+   * Once assigned, you are expected to submit a draft PR or progress update within **5 days**.
+   * If there is no activity or communication on the issue after 5 days, the issue may be unassigned and made available for other contributors.
+   * If you need more time, simply post an update on the issue so the maintainers know you are still active.
+
 
 ## Development Workflow
 
