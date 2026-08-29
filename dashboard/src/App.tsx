@@ -17,6 +17,7 @@ import { ThemeToggle } from './components/ThemeToggle';
 import { MobileNavDrawer, NAV_ITEMS, type Tab } from './components/MobileNavDrawer';
 import { ToastProvider } from './context/ToastContext';
 import { useTheme } from './hooks/useTheme';
+import { useIsMobileNav } from './hooks/useMediaQuery';
 import { DeliveryHeatmap } from './components/DeliveryHeatmap';
 import { useEventStore } from './store/eventStore';
 import { SyncStatus } from './components/SyncStatus';
@@ -31,6 +32,7 @@ export function App() {
     return 'explorer';
   });
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const isMobileNav = useIsMobileNav();
   const { theme, toggleTheme } = useTheme();
   const events = useEventStore((state) => state.events);
   const tabListRef = useRef<HTMLDivElement>(null);
@@ -52,6 +54,14 @@ export function App() {
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
+
+  // Close mobile drawer when the viewport crosses into desktop layout so
+  // hidden overlay/focus-trap state does not linger after a resize (#681).
+  useEffect(() => {
+    if (!isMobileNav && drawerOpen) {
+      setDrawerOpen(false);
+    }
+  }, [isMobileNav, drawerOpen]);
 
   const handleTabKeyDown = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
     const tabs = Array.from(

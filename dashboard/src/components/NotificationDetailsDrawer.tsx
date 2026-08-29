@@ -241,7 +241,22 @@ export function NotificationDetailsDrawer({
           </div>
           <div className="drawer__row">
             <span className="drawer__label">Observed</span>
-            <span className="drawer__value">{formatTimestamp(notification.receivedAt)}</span>
+            <span className="drawer__value drawer__value--wrap">
+              {formatTimestamp(notification.receivedAt)}
+            </span>
+          </div>
+          <div className="drawer__row drawer__row--stack">
+            <span className="drawer__label">Payload</span>
+            <pre className="drawer__payload" title={notification.value}>
+              {notification.value}
+            </pre>
+            <button
+              type="button"
+              className="drawer__action"
+              onClick={() => void tryCopy('Payload', notification.value)}
+            >
+              Copy
+            </button>
           </div>
         </section>
 

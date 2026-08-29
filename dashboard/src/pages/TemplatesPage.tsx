@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   NotificationTemplate,
   CreateNotificationTemplateInput,
@@ -6,6 +6,7 @@ import {
 } from '../types/notificationTemplate';
 import { templatesApi } from '../services/templatesApi';
 import { EmptyState } from '../components/EmptyState';
+import { FormField, FormInput, FormSelect, FormTextarea } from '../components/FormField';
 
 type ViewMode = 'list' | 'create' | 'edit' | 'preview';
 
@@ -19,6 +20,18 @@ export function TemplatesPage() {
     variables: []
   });
   const [previewVariables, setPreviewVariables] = useState<Record<string, string>>({});
+  const [attemptedSave, setAttemptedSave] = useState(false);
+
+  const fieldErrors = useMemo(() => {
+    if (!attemptedSave) {
+      return {} as Record<string, string>;
+    }
+    const errors: Record<string, string> = {};
+    if (!formData.id?.trim()) errors.id = 'ID: enter a unique template identifier.';
+    if (!formData.name?.trim()) errors.name = 'Name: enter a display name for this template.';
+    if (!formData.body?.trim()) errors.body = 'Body: enter the template body content.';
+    return errors;
+  }, [attemptedSave, formData.body, formData.id, formData.name]);
 
   useEffect(() => {
     loadTemplates();
@@ -38,12 +51,14 @@ export function TemplatesPage() {
 
   function handleCreateClick() {
     setFormData({ type: 'email', variables: [] });
+    setAttemptedSave(false);
     setViewMode('create');
   }
 
   function handleEditClick(template: NotificationTemplate) {
     setSelectedTemplate(template);
     setFormData({ ...template });
+    setAttemptedSave(false);
     setViewMode('edit');
   }
 
@@ -54,6 +69,11 @@ export function TemplatesPage() {
   }
 
   async function handleSave() {
+    setAttemptedSave(true);
+    if (!formData.id?.trim() || !formData.name?.trim() || !formData.body?.trim()) {
+      return;
+    }
+
     try {
       if (viewMode === 'create' && formData.id && formData.name && formData.body) {
         await templatesApi.create(formData as CreateNotificationTemplateInput);
@@ -63,6 +83,7 @@ export function TemplatesPage() {
       await loadTemplates();
       setViewMode('list');
       setSelectedTemplate(null);
+      setAttemptedSave(false);
     } catch (error) {
       console.error('Failed to save template:', error);
     }
@@ -135,32 +156,35 @@ export function TemplatesPage() {
             onClick={() => {
               setViewMode('list');
               setSelectedTemplate(null);
+              setAttemptedSave(false);
             }}
           >
             Cancel
           </button>
         </div>
         <div className="templates-form__fields">
-          <div className="templates-form__field">
-            <label>ID</label>
-            <input
+          <FormField id="template-id" label="ID" required error={fieldErrors.id ?? null}>
+            <FormInput
+              fieldId="template-id"
               type="text"
               value={formData.id || ''}
               onChange={(e) => setFormData({ ...formData, id: e.target.value })}
               disabled={viewMode === 'edit'}
+              error={fieldErrors.id ?? null}
             />
-          </div>
-          <div className="templates-form__field">
-            <label>Name</label>
-            <input
+          </FormField>
+          <FormField id="template-name" label="Name" required error={fieldErrors.name ?? null}>
+            <FormInput
+              fieldId="template-name"
               type="text"
               value={formData.name || ''}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              error={fieldErrors.name ?? null}
             />
-          </div>
-          <div className="templates-form__field">
-            <label>Type</label>
-            <select
+          </FormField>
+          <FormField id="template-type" label="Type">
+            <FormSelect
+              fieldId="template-type"
               value={formData.type || 'email'}
               onChange={(e) => setFormData({ ...formData, type: e.target.value })}
             >
@@ -168,27 +192,28 @@ export function TemplatesPage() {
               <option value="discord">Discord</option>
               <option value="slack">Slack</option>
               <option value="telegram">Telegram</option>
-            </select>
-          </div>
-          <div className="templates-form__field">
-            <label>Subject (optional)</label>
-            <input
+            </FormSelect>
+          </FormField>
+          <FormField id="template-subject" label="Subject (optional)">
+            <FormInput
+              fieldId="template-subject"
               type="text"
               value={formData.subject || ''}
               onChange={(e) => setFormData({ ...formData, subject: e.target.value })}
             />
-          </div>
-          <div className="templates-form__field">
-            <label>Body</label>
-            <textarea
+          </FormField>
+          <FormField id="template-body" label="Body" required error={fieldErrors.body ?? null}>
+            <FormTextarea
+              fieldId="template-body"
               value={formData.body || ''}
               onChange={(e) => setFormData({ ...formData, body: e.target.value })}
               rows={10}
+              error={fieldErrors.body ?? null}
             />
-          </div>
-          <div className="templates-form__field">
-            <label>Variables (comma-separated)</label>
-            <input
+          </FormField>
+          <FormField id="template-variables" label="Variables (comma-separated)">
+            <FormInput
+              fieldId="template-variables"
               type="text"
               value={(formData.variables || []).join(', ')}
               onChange={(e) => setFormData({
@@ -196,12 +221,11 @@ export function TemplatesPage() {
                 variables: e.target.value.split(',').map((v) => v.trim()).filter(Boolean)
               })}
             />
-          </div>
+          </FormField>
         </div>
         <button
           type="button"
           onClick={handleSave}
-          disabled={!formData.id || !formData.name || !formData.body}
         >
           Save Template
         </button>

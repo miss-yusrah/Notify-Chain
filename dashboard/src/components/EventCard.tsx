@@ -104,6 +104,15 @@ function handleActivationKey(onClick: (e: BlockchainEvent) => void, event: Block
   };
 }
 
+function IdValue({ value, label }: { value: string; label: string }) {
+  return (
+    <dd className="event-card__id-value" title={value}>
+      <span className="event-card__id-text">{shortenAddress(value)}</span>
+      <CopyButton value={value} label={label} size="xs" />
+    </dd>
+  );
+}
+
 function CompactCard({ event, onClick }: { event: BlockchainEvent; onClick?: (e: BlockchainEvent) => void }) {
   const displayName = event.eventName ?? event.type;
   const badgeClass = getEventBadgeClass(event.eventName);
@@ -132,7 +141,9 @@ function CompactCard({ event, onClick }: { event: BlockchainEvent; onClick?: (e:
         </span>
       </div>
       <div className="event-card__details">
-        <span>Value: {event.value}</span>
+        <span className="event-card__value-preview" title={event.value}>
+          Value: {event.value}
+        </span>
         {event.txHash && (
           <span title={event.txHash}>Tx: {shortenAddress(event.txHash)}</span>
         )}
@@ -165,13 +176,13 @@ function ExpandedCard({ event, onClick }: { event: BlockchainEvent; onClick?: (e
         <dl className="event-card__fields">
           <div className="event-card__field">
             <dt>Contract</dt>
-            <dd title={event.contractAddress}>{event.contractAddress}</dd>
+            <IdValue value={event.contractAddress} label="contract address" />
           </div>
 
           {event.txHash && (
             <div className="event-card__field">
               <dt>Tx Hash</dt>
-              <dd title={event.txHash}>{event.txHash}</dd>
+              <IdValue value={event.txHash} label="tx hash" />
             </div>
           )}
 
@@ -182,7 +193,7 @@ function ExpandedCard({ event, onClick }: { event: BlockchainEvent; onClick?: (e
 
           <div className="event-card__field">
             <dt>Value</dt>
-            <dd>{event.value}</dd>
+            <dd className="event-card__payload">{event.value}</dd>
           </div>
 
           {event.topic.length > 0 && (
@@ -205,10 +216,7 @@ function ExpandedCard({ event, onClick }: { event: BlockchainEvent; onClick?: (e
 
           <div className="event-card__field">
             <dt>Event ID</dt>
-            <dd className="event-card__id">
-              {event.eventId}
-              <CopyButton value={event.eventId} label="event ID" size="xs" />
-            </dd>
+            <IdValue value={event.eventId} label="event ID" />
           </div>
         </dl>
       </div>

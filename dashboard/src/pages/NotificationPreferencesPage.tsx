@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { FormField, FormInput } from '../components/FormField';
 
 type ChannelKey = 'inApp' | 'email' | 'discord' | 'telegram';
 type CategoryKey = 'security' | 'governance' | 'system' | 'custom';
@@ -249,10 +250,17 @@ export function NotificationPreferencesPage() {
               <p>Provide delivery details for email and Telegram routing.</p>
             </div>
 
-            <div className={`notification-preferences__field${emailInvalid ? ' notification-preferences__field--invalid' : ''}`}>
-              <label htmlFor="contact-email">Email address</label>
-              <input
-                id="contact-email"
+            <FormField
+              id="contact-email"
+              label="Email address"
+              error={
+                emailInvalid
+                  ? 'Email address: enter a valid email when Email notifications are enabled.'
+                  : null
+              }
+            >
+              <FormInput
+                fieldId="contact-email"
                 type="email"
                 value={contactEmail}
                 onChange={(event) => {
@@ -260,21 +268,25 @@ export function NotificationPreferencesPage() {
                   setSaveState('idle');
                 }}
                 placeholder="recipient@example.com"
-                aria-invalid={emailInvalid}
-                aria-describedby={emailInvalid ? 'contact-email-error' : undefined}
-                className={emailInvalid ? 'notification-preferences__input--invalid' : undefined}
+                error={
+                  emailInvalid
+                    ? 'Email address: enter a valid email when Email notifications are enabled.'
+                    : null
+                }
               />
-              {emailInvalid && (
-                <p id="contact-email-error" className="notification-preferences__field-error" role="alert">
-                  Enter a valid email when Email notifications are enabled.
-                </p>
-              )}
-            </div>
+            </FormField>
 
-            <div className={`notification-preferences__field${telegramInvalid ? ' notification-preferences__field--invalid' : ''}`}>
-              <label htmlFor="telegram-handle">Telegram handle</label>
-              <input
-                id="telegram-handle"
+            <FormField
+              id="telegram-handle"
+              label="Telegram handle"
+              error={
+                telegramInvalid
+                  ? 'Telegram handle: must start with @ and contain at least 3 characters.'
+                  : null
+              }
+            >
+              <FormInput
+                fieldId="telegram-handle"
                 type="text"
                 value={telegramHandle}
                 onChange={(event) => {
@@ -282,16 +294,13 @@ export function NotificationPreferencesPage() {
                   setSaveState('idle');
                 }}
                 placeholder="@yourhandle"
-                aria-invalid={telegramInvalid}
-                aria-describedby={telegramInvalid ? 'telegram-handle-error' : undefined}
-                className={telegramInvalid ? 'notification-preferences__input--invalid' : undefined}
+                error={
+                  telegramInvalid
+                    ? 'Telegram handle: must start with @ and contain at least 3 characters.'
+                    : null
+                }
               />
-              {telegramInvalid && (
-                <p id="telegram-handle-error" className="notification-preferences__field-error" role="alert">
-                  Telegram handle must start with @ and contain at least 3 characters.
-                </p>
-              )}
-            </div>
+            </FormField>
 
             {errorCategories.length > 0 && (
               <div className="notification-preferences__validation-panel" role="alert">
